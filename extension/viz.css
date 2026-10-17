@@ -1,0 +1,36 @@
+html, body { margin: 0; height: 100%; background: #000; overflow: hidden; font: 14px system-ui, sans-serif; color: #fff; }
+canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+body.hide-cursor, body.hide-cursor canvas { cursor: none; }
+[hidden] { display: none !important; }
+
+#ui { transition: opacity .5s; }
+body.idle #ui { opacity: .22; }
+body.idle.fs #ui { opacity: 0; pointer-events: none; }
+body.idle #ui:hover { opacity: 1; }
+
+#dock { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); display: flex; gap: 12px; }
+.btn { width: 52px; height: 52px; padding: 0; cursor: pointer; display: grid; place-items: center; border-radius: 18px; }
+.btn svg { width: 26px; height: 26px; fill: none; stroke: #fff; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round;
+  position: relative; z-index: 1; filter: drop-shadow(0 1px 2px rgba(0,0,0,.6)); }
+.btn.on { background: linear-gradient(180deg, rgba(255,255,255,.55), rgba(120,200,255,.35)); border-color: #fff; }
+.btn.on svg { fill: #fff; }
+
+#settings { position: fixed; right: 22px; bottom: 96px; width: 260px; padding: 16px; display: flex; flex-direction: column; gap: 14px; border-radius: 20px; }
+#settings > * { position: relative; z-index: 1; }
+#settings label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; letter-spacing: .3px; }
+#settings label.row { flex-direction: row; justify-content: space-between; align-items: center; }
+#settings input[type=checkbox] { width: 18px; height: 18px; accent-color: #7fd8ff; }
+#settings input[type=range] { accent-color: #7fd8ff; }
+select { font: inherit; color: #fff; padding: 7px 8px; border-radius: 10px; border: 1px solid rgba(255,255,255,.5);
+  background: rgba(10,10,30,.45); outline: none; }
+select option { background: #14142a; color: #fff; }
+
+#pill { position: fixed; left: 50%; top: 28px; transform: translateX(-50%); padding: 10px 26px; border-radius: 999px; font-size: 17px;
+  font-weight: 600; letter-spacing: .5px; opacity: 0; transition: opacity .6s; pointer-events: none; text-transform: capitalize; }
+#pill.show { opacity: 1; transition: opacity .15s; }
+#pill small { display: block; font-size: 11px; font-weight: 400; text-transform: none; color: #ffc9c9; max-width: 60vw; white-space: pre-wrap; }
+
+#msg, #fatal, #start { position: fixed; left: 50%; transform: translateX(-50%); padding: 12px 22px; text-align: center; max-width: 70vw; }
+#msg { top: 90px; border-radius: 14px; }
+#start { top: 50%; transform: translate(-50%, -50%); font: 600 18px system-ui; padding: 18px 34px; cursor: pointer; border-radius: 22px; }
+#fatal { top: 50%; transform: translate(-50%, -50%); font-size: 16px; line-height: 1.5; padding: 26px 34px; }

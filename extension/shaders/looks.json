@@ -1,0 +1,92 @@
+[
+  {
+    "file": "bass_drop.wgsl",
+    "name": "Bass Drop",
+    "palette": [
+      "#ff1f8f",
+      "#7a2cff",
+      "#12e0ff"
+    ]
+  },
+  {
+    "file": "ferrofluid.wgsl",
+    "name": "Ferrofluid",
+    "palette": [
+      "#ff3a6e",
+      "#8a3cff",
+      "#19d6ff"
+    ]
+  },
+  {
+    "file": "data_bus.wgsl",
+    "name": "Data Bus",
+    "palette": [
+      "#18e4ff",
+      "#ff2ad4",
+      "#f0f6ff"
+    ]
+  },
+  {
+    "file": "pulse_ring.wgsl",
+    "name": "Pulse Ring",
+    "palette": [
+      "#1ee0ff",
+      "#8b3dff",
+      "#ff2d7a"
+    ]
+  },
+  {
+    "file": "neon_horizon.wgsl",
+    "name": "Neon Horizon",
+    "palette": [
+      "#ff2a9d",
+      "#7b2cff",
+      "#ffcf3a"
+    ]
+  },
+  {
+    "file": "reef_arcade.wgsl",
+    "name": "Reef Arcade",
+    "palette": [
+      "#ff4a2e",
+      "#ffd23c",
+      "#20d8ff"
+    ]
+  },
+  {
+    "file": "deep_wreck.wgsl",
+    "name": "Deep Wreck",
+    "palette": [
+      "#ff6a3c",
+      "#ffc861",
+      "#3cf0ff"
+    ]
+  },
+  {
+    "file": "moonlight_piano.wgsl",
+    "name": "Moonlight Piano",
+    "palette": [
+      "#2c3f8f",
+      "#ffc35c",
+      "#dbe9ff"
+    ]
+  },
+  {
+    "file": "aurora.wgsl",
+    "name": "Aurora",
+    "palette": [
+      "#3dff8f",
+      "#1fc9d6",
+      "#a45cff"
+    ]
+  },
+  {
+    "file": "classic_bars.wgsl",
+    "name": "Classic Bars",
+    "palette": [
+      "#22ff66",
+      "#ffd21a",
+      "#ff2a1a"
+    ]
+  }
+]

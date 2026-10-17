@@ -1,0 +1,52 @@
+﻿[package]
+name = "music-visualizer"
+version = "2.0.0"
+edition = "2021"
+description = "GPU music visualizer for the Windows tray: reacts to whatever your PC is playing"
+license = "MIT"
+
+[[bin]]
+name = "MusicVisualizer"
+path = "src/main.rs"
+
+[dependencies]
+wgpu = { version = "25", default-features = false, features = ["dx12", "wgsl"] }
+winit = "0.30"
+pollster = "0.4"
+bytemuck = { version = "1", features = ["derive"] }
+rustfft = "6"
+tray-icon = "0.21"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Media_Audio",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Threading",
+    "Win32_System_Console",
+    "Win32_System_Variant",
+    "Win32_Security",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Memory",
+    "Win32_System_Registry",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_Dwm",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Media_Control",
+    "Storage_Streams",
+    "Foundation",
+] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true
+
+
+
+
+
+

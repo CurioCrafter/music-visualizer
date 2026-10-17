@@ -1,0 +1,23 @@
+/* Frosted glass: blur + white frost + top gloss + bright rim + hover shine sweep */
+.glass {
+  position: relative; overflow: hidden; color: #fff;
+  background: linear-gradient(180deg, rgba(255,255,255,.34), rgba(255,255,255,.15) 55%, rgba(255,255,255,.22));
+  -webkit-backdrop-filter: blur(16px) saturate(1.5); backdrop-filter: blur(16px) saturate(1.5);
+  border: 1px solid rgba(255,255,255,.6); border-radius: 16px;
+  box-shadow: 0 6px 20px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.8), inset 0 -10px 16px rgba(255,255,255,.08);
+  text-shadow: 0 1px 3px rgba(0,0,0,.55);
+}
+.glass::before { /* top gloss crescent */
+  content: ""; position: absolute; left: 6%; right: 6%; top: 2px; height: 46%; pointer-events: none;
+  border-radius: 14px 14px 50% 50% / 14px 14px 100% 100%;
+  background: linear-gradient(rgba(255,255,255,.42), rgba(255,255,255,0));
+}
+.glass::after { /* hover shine sweep */
+  content: ""; position: absolute; top: -30%; bottom: -30%; left: -70%; width: 38%; pointer-events: none;
+  transform: skewX(-22deg);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.6), transparent);
+}
+button.glass:hover::after { animation: sweep .75s ease; }
+button.glass:hover { background: linear-gradient(180deg, rgba(255,255,255,.44), rgba(255,255,255,.2) 55%, rgba(255,255,255,.3)); }
+button.glass:active { transform: translateY(1px) scale(.98); }
+@keyframes sweep { from { left: -70%; } to { left: 140%; } }

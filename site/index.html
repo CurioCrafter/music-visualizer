@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Music Visualizer: GPU visuals for whatever you're playing</title>
+<meta name="description" content="A GPU music visualizer for the Windows tray and the browser. Ten hand-built WGSL shader worlds that react to kicks, snares, hi-hats, tempo and the drop. Rust + wgpu, WebGPU, Chrome extension.">
+<meta property="og:title" content="Music Visualizer">
+<meta property="og:description" content="Ten GPU shader worlds that react to every part of your music. Windows tray app, browser demo and Chrome extension.">
+<meta property="og:image" content="https://curiocrafter.github.io/music-visualizer/media/looks/bass_drop.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="app/icons/icon48.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #05040a;
+    --ink: #eef0ff;
+    --dim: #a3a7c4;
+    --pink: #ff2fa6;
+    --violet: #8a3cff;
+    --cyan: #22e0ff;
+    --glass: rgba(255, 255, 255, 0.07);
+    --rim: rgba(255, 255, 255, 0.22);
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 17px/1.6 "Space Grotesk", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased; overflow-x: hidden;
+  }
+  a { color: inherit; }
+  code, pre { font-family: "JetBrains Mono", ui-monospace, monospace; }
+
+  /* ---------- glass ---------- */
+  .glass {
+    background: linear-gradient(180deg, rgba(255,255,255,.14), rgba(255,255,255,.04) 55%, rgba(255,255,255,.08));
+    backdrop-filter: blur(18px) saturate(140%); -webkit-backdrop-filter: blur(18px) saturate(140%);
+    border: 1px solid var(--rim);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 10px 40px rgba(0,0,0,.45);
+    position: relative; overflow: hidden;
+  }
+  .btn {
+    display: inline-flex; align-items: center; gap: .55em; padding: .85em 1.35em; border-radius: 999px;
+    text-decoration: none; font-weight: 500; color: #fff; transition: transform .18s ease, box-shadow .18s ease;
+  }
+  .btn::after { /* sweeping shine on hover */
+    content: ""; position: absolute; inset: -20% auto -20% -60%; width: 40%;
+    background: linear-gradient(100deg, transparent, rgba(255,255,255,.45), transparent);
+    transform: skewX(-20deg); transition: left .6s ease;
+  }
+  .btn:hover { transform: translateY(-2px) scale(1.03); box-shadow: inset 0 1px 0 rgba(255,255,255,.5), 0 14px 40px rgba(0,0,0,.5); }
+  .btn:hover::after { left: 130%; }
+  .btn.primary { background: linear-gradient(135deg, rgba(255,47,166,.55), rgba(138,60,255,.55) 55%, rgba(34,224,255,.45)); }
+  .btn svg { width: 1.15em; height: 1.15em; }
+
+  /* ---------- hero ---------- */
+  .hero { position: relative; min-height: 100svh; display: grid; place-items: center; text-align: center; padding: 6rem 1.25rem 4rem; isolation: isolate; }
+  .hero video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: -2; filter: saturate(1.15); }
+  .hero::before { content: ""; position: absolute; inset: 0; z-index: -1;
+    background: radial-gradient(ellipse at center, rgba(5,4,10,.35), rgba(5,4,10,.85) 75%), linear-gradient(180deg, transparent 60%, var(--bg)); }
+  .hero-card { max-width: 860px; padding: 2.6rem 2.4rem; border-radius: 28px; }
+  .eyebrow { font-family: "JetBrains Mono", monospace; font-size: .8rem; letter-spacing: .22em; text-transform: uppercase; color: var(--cyan); }
+  h1 { font-size: clamp(2.6rem, 7vw, 5.2rem); line-height: 1; margin: .35em 0 .3em; letter-spacing: -.02em; color: #fff; }
+  .lede { font-size: 1.2rem; color: #dfe1f5; max-width: 640px; margin: 0 auto 1.8rem; }
+  .ctas { display: flex; flex-wrap: wrap; gap: .8rem; justify-content: center; }
+  .ctas small { display: block; margin-top: 1rem; color: var(--dim); font-size: .85rem; }
+  .eq { display: flex; gap: 4px; justify-content: center; height: 26px; align-items: end; margin-bottom: .8rem; }
+  .eq i { width: 5px; border-radius: 3px; background: linear-gradient(var(--cyan), var(--pink)); animation: eq 1s ease-in-out infinite; }
+  @keyframes eq { 0%,100% { height: 20%; } 50% { height: 100%; } }
+
+  /* ---------- sections ---------- */
+  section { max-width: 1180px; margin: 0 auto; padding: 5.5rem 1.25rem 1rem; }
+  h2 { font-size: clamp(1.9rem, 4vw, 2.8rem); margin: 0 0 .4rem; letter-spacing: -.01em; }
+  .sub { color: var(--dim); margin: 0 0 2.2rem; max-width: 720px; }
+
+  .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 1.2rem; }
+  .look { border-radius: 20px; padding: 0; transition: transform .25s ease; }
+  .look:hover { transform: translateY(-4px); }
+  .look img { width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block; }
+  .look div { padding: .9rem 1.1rem 1.1rem; }
+  .look h3 { margin: 0 0 .2rem; font-size: 1.15rem; }
+  .look p { margin: 0; color: var(--dim); font-size: .95rem; line-height: 1.45; }
+  .tag { font-family: "JetBrains Mono", monospace; font-size: .7rem; color: var(--cyan); letter-spacing: .12em; text-transform: uppercase; }
+
+  .signals { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 1rem; }
+  .sig { border-radius: 18px; padding: 1.2rem 1.25rem; }
+  .sig b { display: block; font-size: 1.05rem; margin-bottom: .2rem; }
+  .sig span { color: var(--dim); font-size: .95rem; }
+  .sig .meter { height: 4px; border-radius: 4px; margin-bottom: .9rem; background: linear-gradient(90deg, var(--pink), var(--violet), var(--cyan)); background-size: 200% 100%; animation: flow 3s linear infinite; }
+  @keyframes flow { to { background-position: -200% 0; } }
+
+  .split { display: grid; grid-template-columns: 1.1fr 1fr; gap: 1.4rem; align-items: start; }
+  @media (max-width: 860px) { .split { grid-template-columns: 1fr; } }
+  .card { border-radius: 22px; padding: 1.6rem 1.7rem; }
+  .card ul { margin: .4rem 0 0; padding-left: 1.1rem; color: #d6d9ef; }
+  .card li { margin: .35rem 0; }
+  pre { margin: 0; padding: 1.3rem 1.4rem; border-radius: 18px; overflow-x: auto; font-size: .86rem; line-height: 1.55; color: #e6e8ff; }
+  .k { color: var(--pink); } .c { color: #7f84a8; } .f { color: var(--cyan); } .n { color: #ffd166; }
+  .stats { display: flex; flex-wrap: wrap; gap: 1rem; margin-top: 1.4rem; }
+  .stat { border-radius: 16px; padding: .8rem 1.1rem; min-width: 140px; }
+  .stat b { display: block; font-size: 1.5rem; }
+  .stat span { color: var(--dim); font-size: .85rem; }
+
+  .try { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; }
+  .try a { border-radius: 20px; padding: 1.4rem; text-decoration: none; display: block; transition: transform .2s ease; }
+  .try a:hover { transform: translateY(-3px); }
+  .try b { font-size: 1.15rem; display: block; margin-bottom: .25rem; }
+  .try span { color: var(--dim); font-size: .95rem; }
+
+  footer { max-width: 1180px; margin: 5rem auto 0; padding: 2rem 1.25rem 3rem; color: var(--dim); display: flex; flex-wrap: wrap; gap: 1rem; justify-content: space-between; border-top: 1px solid rgba(255,255,255,.08); }
+  footer a { color: var(--ink); }
+  @media (prefers-reduced-motion: reduce) { .eq i, .sig .meter { animation: none; } .hero video { display: none; } .hero { background: url(media/poster.jpg) center/cover; } }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <video autoplay muted loop playsinline poster="media/poster.jpg" aria-hidden="true">
+    <source src="media/reel.mp4" type="video/mp4">
+  </video>
+  <div class="hero-card glass">
+    <div class="eq" aria-hidden="true"><i style="animation-delay:-.1s"></i><i style="animation-delay:-.5s"></i><i style="animation-delay:-.3s"></i><i style="animation-delay:-.8s"></i><i style="animation-delay:-.2s"></i><i style="animation-delay:-.6s"></i><i style="animation-delay:-.4s"></i></div>
+    <div class="eyebrow">Rust · wgpu · WebGPU · WGSL</div>
+    <h1>Music Visualizer</h1>
+    <p class="lede">Ten hand-built GPU worlds that react to every part of whatever you're playing: the kick, the snare, the hi-hats, the tempo, and the drop.</p>
+    <div class="ctas">
+      <a class="btn primary glass" href="app/visualizer.html?mode=demo">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>Try it in your browser</a>
+      <a class="btn glass" href="https://github.com/CurioCrafter/music-visualizer/releases/latest/download/MusicVisualizer.exe">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 5.5 10 4.5v7H3zm8-1.1L21 3v8.5H11zM3 12.5h7v7l-7-1zm8 0h10V21l-10-1.4z"/></svg>Download for Windows</a>
+      <a class="btn glass" href="https://github.com/CurioCrafter/music-visualizer">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5a11.5 11.5 0 0 0-3.6 22.4c.6.1.8-.3.8-.6v-2c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.4-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.4 11.4 0 0 1 6 0C17.3 4.4 18.3 4.7 18.3 4.7c.6 1.7.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A11.5 11.5 0 0 0 12 .5z"/></svg>Source on GitHub</a>
+    </div>
+    <div class="ctas"><small>Free and open source (MIT). Windows 10/11 · Chrome / Edge with WebGPU.</small></div>
+  </div>
+</header>
+
+<section id="looks">
+  <div class="tag">The looks</div>
+  <h2>Ten worlds, all shaders</h2>
+  <p class="sub">Every look is a single WGSL fragment shader running on your GPU, about half a millisecond a frame. They stay full of detail even at 4K full screen.</p>
+  <div class="gallery">
+    <article class="look glass"><img loading="lazy" src="media/looks/bass_drop.jpg" alt="Bass Drop look: a club with a pumping woofer, lasers and a crowd"><div><h3>Bass Drop</h3><p>A club for heavy bass. The woofer pumps with the sub, lasers and moving heads cut through haze, and the crowd jumps on the beat.</p></div></article>
+    <article class="look glass"><img loading="lazy" src="media/looks/ferrofluid.jpg" alt="Ferrofluid look: glossy magnetic liquid with spikes"><div><h3>Ferrofluid</h3><p>Glossy magnetic liquid on a mirror floor. The spectrum spikes out of it, field lines spin, and iron filings stand up with the bass.</p></div></article>
+    <article class="look glass"><img loading="lazy" src="media/looks/data_bus.jpg" alt="Data Bus look: neon wireframe tunnel"><div><h3>Data Bus</h3><p>Negative line art: fly down a data tunnel over a wireframe city. Viruses get deleted on the kick, and a bitstream worm lunges on the drop.</p></div></article>
+    <article class="look glass"><img loading="lazy" src="media/looks/pulse_ring.jpg" alt="Pulse Ring look: a glowing reactor of rings"><div><h3>Pulse Ring</h3><p>A reactor core: a spectrum crown, a ring drawn from the real waveform, spinning arc rings, a particle vortex and shockwaves.</p></div></article>
+    <article class="look glass"><img loading="lazy" src="media/looks/neon_horizon.jpg" alt="Neon Horizon look: synthwave sun and road"><div><h3>Neon Horizon</h3><p>Synthwave. Mountains are built from the last few seconds of music. Includes a striped sun, a racing grid, a car, palms and VHS.</p></div></article>
+    <article class="look glass"><img loading="lazy" src="media/looks/reef_arcade.jpg" alt="Reef Arcade look: pixel-art coral reef"><div><h3>Reef Arcade</h3><p>Pixel art. The coral is the spectrum, a diver spears lionfish on the beat, and a boss shows up on the drop. The score counts the beats.</p></div></article>
+    <article class="look glass"><img loading="lazy" src="media/looks/deep_wreck.jpg" alt="Deep Wreck look: a liner wreck under god rays"><div><h3>Deep Wreck</h3><p>An ocean liner on the sea floor. Its portholes are the spectrum, and sonar pings land on the beat. A diver's torch, a whale and jellyfish fill the water.</p></div></article>
+    <article class="look glass"><img loading="lazy" src="media/looks/moonlight_piano.jpg" alt="Moonlight Piano look: a moonlit lake and glowing piano"><div><h3>Moonlight Piano</h3><p>A night lake under the moon. The keyboard lights up the notes actually being played, and each one ripples across the water.</p></div></article>
+    <article class="look glass"><img loading="lazy" src="media/looks/aurora.jpg" alt="Aurora look: northern lights over mountains and a lake"><div><h3>Aurora</h3><p>Northern lights over snowy peaks and a mirror lake. Each curtain follows its own band of the music, and a wolf howls on the drop.</p></div></article>
+    <article class="look glass"><img loading="lazy" src="media/looks/classic_bars.jpg" alt="Classic Bars look: hi-fi spectrum analyser"><div><h3>Classic Bars</h3><p>A hi-fi rack: LED spectrum analyser with peak hold, twin VU meters, a phosphor scope and seven-segment readouts.</p></div></article>
+  </div>
+</section>
+
+<section id="react">
+  <div class="tag">Reacts to everything</div>
+  <h2>Not just "louder = bigger"</h2>
+  <p class="sub">A real-time analyzer splits the music into separate signals, and every look gives each one its own job.</p>
+  <div class="signals">
+    <div class="sig glass"><div class="meter"></div><b>Kick · snare · hi-hat</b><span>Separate onset detectors with adaptive thresholds, so a snare can flash the lights while the kick punches the camera.</span></div>
+    <div class="sig glass"><div class="meter" style="animation-delay:-1s"></div><b>Tempo &amp; beat phase</b><span>A tempo tracker knows where you are inside each beat, so motion lands on the beat instead of after it.</span></div>
+    <div class="sig glass"><div class="meter" style="animation-delay:-2s"></div><b>The drop</b><span>Detects the bass slamming back after a break-down and triggers shockwaves, strobes and boss fights.</span></div>
+    <div class="sig glass"><div class="meter" style="animation-delay:-.5s"></div><b>Piano notes</b><span>An 8192-point FFT picks out the 88 keys, so the moonlit keyboard plays along with real piano.</span></div>
+    <div class="sig glass"><div class="meter" style="animation-delay:-1.5s"></div><b>Energy &amp; brightness</b><span>Quiet verse or huge chorus, dark sub or airy treble: the scene changes how much is lit and what colour it is.</span></div>
+    <div class="sig glass"><div class="meter" style="animation-delay:-2.5s"></div><b>History &amp; waveform</b><span>The last 3.2 seconds of spectrum and the raw waveform drive mountains, echoes and oscilloscope rings.</span></div>
+  </div>
+</section>
+
+<section id="try">
+  <div class="tag">Try it</div>
+  <h2>Run it right here</h2>
+  <p class="sub">The browser version runs the exact same shaders with WebGPU (Chrome or Edge). Mouse control works too: press <code>M</code>, then move and click.</p>
+  <div class="try">
+    <a class="glass" href="app/visualizer.html?mode=demo"><b>▶ Demo song</b><span>A built-in 128 BPM track with a breakdown and a drop.</span></a>
+    <a class="glass" href="app/visualizer.html?mode=display"><b>⧉ Share a tab's audio</b><span>Pick a YouTube or Spotify tab and tick "Share audio".</span></a>
+    <a class="glass" href="app/visualizer.html?mode=mic"><b>🎙 Microphone</b><span>Listen to the room: music from your speakers.</span></a>
+  </div>
+</section>
+
+<section id="built">
+  <div class="tag">How it's built</div>
+  <h2>One shader set, two runtimes</h2>
+  <div class="split">
+    <div class="card glass">
+      <ul>
+        <li><b>Windows app in Rust</b> on wgpu / DirectX 12: a single 5 MB exe that lives in the tray, docks anywhere, snaps to edges and goes full screen.</li>
+        <li><b>System audio</b> via WASAPI loopback, so it hears whatever your PC plays, with no virtual cables.</li>
+        <li><b>Glass UI on the GPU:</b> frosted backdrop blur, gloss and a rim that glints on the beat. The look recolours itself from the current song's album art.</li>
+        <li><b>Chrome extension</b> on WebGPU, running the same WGSL files, with tab capture.</li>
+        <li><b>Low latency:</b> one frame in flight, so the visuals land on the sound. It runs at below-normal priority, so your games always come first.</li>
+      </ul>
+      <div class="stats">
+        <div class="stat glass"><b>~0.5 ms</b><span>per frame, per look</span></div>
+        <div class="stat glass"><b>10</b><span>shader worlds</span></div>
+        <div class="stat glass"><b>5 MB</b><span>single exe</span></div>
+      </div>
+    </div>
+<pre class="glass"><span class="c">// shaders/looks/my_look.wgsl: a whole look</span>
+<span class="c">// name: My Look</span>
+<span class="c">// palette: #ff2fa6 #8a3cff #22e0ff</span>
+
+<span class="k">fn</span> <span class="f">look</span>(fc: <span class="k">vec2f</span>) -> <span class="k">vec4f</span> {
+    <span class="k">let</span> p = <span class="f">centered</span>(fc);
+    <span class="k">let</span> r = <span class="n">0.35</span> + <span class="n">0.25</span> * G.kick       <span class="c">// punch on the kick</span>
+          + <span class="n">0.1</span> * <span class="f">spec</span>(<span class="f">fract</span>(<span class="f">atan2</span>(p.y, p.x) / TAU));
+    <span class="k">var</span> col = <span class="f">pal</span>(G.beat_phase) * <span class="f">glow</span>(<span class="f">abs</span>(<span class="f">length</span>(p) - r), <span class="n">0.02</span>);
+    col += <span class="f">vec3f</span>(G.drop) * <span class="n">0.3</span>;        <span class="c">// flash on the drop</span>
+    <span class="k">return</span> <span class="f">vec4f</span>(col, <span class="n">1.0</span>);
+}</pre>
+  </div>
+</section>
+
+<footer>
+  <span>Made by <a href="https://curiocrafter.github.io/">Andrew Rainsberger</a> · MIT licence</span>
+  <span><a href="https://github.com/CurioCrafter/music-visualizer">GitHub</a> · <a href="https://github.com/CurioCrafter/music-visualizer/releases/latest">Downloads</a> · <a href="https://github.com/CurioCrafter/music-visualizer/blob/main/docs/WRITING_LOOKS.md">Write a look</a></span>
+</footer>
+</body>
+</html>

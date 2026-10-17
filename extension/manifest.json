@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Music Visualizer",
+  "version": "0.1.0",
+  "description": "GPU music visualizer: WebGPU shader looks that react to the audio of a tab, your system, or a built-in demo song.",
+  "permissions": ["tabCapture", "activeTab", "storage"],
+  "action": {
+    "default_title": "Music Visualizer",
+    "default_popup": "popup.html",
+    "default_icon": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" }
+  },
+  "icons": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" }
+}

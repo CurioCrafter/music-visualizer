@@ -1,0 +1,9 @@
+/target/
+/dist/
+/app/
+/tools/shots/
+/.impeccable/
+legacy/bin/
+legacy/obj/
+*.log
+/legacy/
