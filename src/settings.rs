@@ -4,6 +4,8 @@ use std::path::PathBuf;
 use windows::core::PCWSTR;
 use windows::Win32::System::Registry::*;
 
+pub static NO_SAVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 pub const FPS: [u32; 3] = [30, 60, 0]; // 0 = match the display (vsync)
 pub const QUALITY: [&str; 3] = ["Low", "Balanced", "High"];
 pub const QUALITY_SCALE: [f32; 3] = [0.5, 0.75, 1.0];
@@ -70,6 +72,9 @@ impl Settings {
     }
 
     pub fn save(&self) {
+        if NO_SAVE.load(std::sync::atomic::Ordering::Relaxed) {
+            return; // --probe runs off-screen: never store its test window position
+        }
         let p = path();
         let _ = std::fs::create_dir_all(p.parent().unwrap());
         let (x, y, w, h) = self.bounds.unwrap_or((0, 0, 0, 0));

@@ -37,6 +37,7 @@ fn main() {
     }
     let event_loop = winit::event_loop::EventLoop::new().expect("event loop");
     let probe = args.iter().any(|a| a == "--probe");
+    settings::NO_SAVE.store(probe, std::sync::atomic::Ordering::Relaxed);
     let mut app = app::App::new(args.iter().any(|a| a == "--hidden"), probe);
     let _ = event_loop.run_app(&mut app);
 }
