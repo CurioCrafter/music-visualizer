@@ -64,7 +64,8 @@ pub fn render(items: &[TextItem], w: u32, h: u32) -> Vec<u8> {
                 continue;
             }
             px.fill(0);
-            for it in items.iter().filter(|i| i.channel == ch) {
+            // empty strings must never reach DrawTextW: it reads the (dangling) buffer and crashes in USER32
+            for it in items.iter().filter(|i| i.channel == ch && !i.text.is_empty()) {
                 let face = if it.icon { &icon_face } else if it.bold { &bold_face } else { &ui_face };
                 let font = CreateFontW(
                     -(it.size.round() as i32), 0, 0, 0, if it.bold { 600 } else { 400 }, 0, 0, 0,
@@ -96,6 +97,9 @@ pub fn render(items: &[TextItem], w: u32, h: u32) -> Vec<u8> {
 
 /// Width of a string in px (for sizing pills to their text).
 pub fn measure(text: &str, size: f32, bold: bool) -> f32 {
+    if text.is_empty() {
+        return 0.0;
+    }
     unsafe {
         let hdc = CreateCompatibleDC(None);
         let face = wide(if bold { "Segoe UI Semibold" } else { "Segoe UI" });
