@@ -96,32 +96,34 @@ fn wide(s: &str) -> Vec<u16> {
 const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 const VALUE: &str = "MusicVisualizer";
 
+// Startup is a shortcut in the Startup folder (easy to see and check); the old Run value is only removed.
+fn startup_lnk() -> PathBuf {
+    PathBuf::from(std::env::var("APPDATA").unwrap_or_default()).join(r"Microsoft\Windows\Start Menu\Programs\Startup\Music Visualizer.lnk")
+}
+
 pub fn startup_on() -> bool {
-    unsafe {
-        let mut key = HKEY::default();
-        if RegOpenKeyExW(HKEY_CURRENT_USER, PCWSTR(wide(RUN_KEY).as_ptr()), None, KEY_READ, &mut key).is_err() {
-            return false;
-        }
-        let ok = RegQueryValueExW(key, PCWSTR(wide(VALUE).as_ptr()), None, None, None, None).is_ok();
-        let _ = RegCloseKey(key);
-        ok
-    }
+    startup_lnk().exists()
 }
 
 pub fn set_startup(on: bool) {
     unsafe {
         let mut key = HKEY::default();
-        if RegOpenKeyExW(HKEY_CURRENT_USER, PCWSTR(wide(RUN_KEY).as_ptr()), None, KEY_SET_VALUE, &mut key).is_err() {
-            return;
-        }
-        if on {
-            let exe = std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_default();
-            let v = wide(&format!("\"{exe}\" --hidden"));
-            let bytes = std::slice::from_raw_parts(v.as_ptr() as *const u8, v.len() * 2);
-            let _ = RegSetValueExW(key, PCWSTR(wide(VALUE).as_ptr()), None, REG_SZ, Some(bytes));
-        } else {
+        if RegOpenKeyExW(HKEY_CURRENT_USER, PCWSTR(wide(RUN_KEY).as_ptr()), None, KEY_SET_VALUE, &mut key).is_ok() {
             let _ = RegDeleteValueW(key, PCWSTR(wide(VALUE).as_ptr()));
+            let _ = RegCloseKey(key);
         }
-        let _ = RegCloseKey(key);
     }
+    let lnk = startup_lnk();
+    if !on {
+        let _ = std::fs::remove_file(lnk);
+        return;
+    }
+    use std::os::windows::process::CommandExt;
+    let exe = std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_default();
+    let ps = format!(
+        "$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{}'); $s.TargetPath='{}'; $s.Arguments='--hidden'; $s.Save()",
+        lnk.display().to_string().replace('\'', "''"),
+        exe.replace('\'', "''")
+    );
+    let _ = std::process::Command::new("powershell").args(["-NoProfile", "-NonInteractive", "-Command", &ps]).creation_flags(0x0800_0000).status(); // CREATE_NO_WINDOW
 }
