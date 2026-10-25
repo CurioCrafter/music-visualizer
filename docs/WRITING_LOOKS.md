@@ -37,6 +37,21 @@ fn look(fc: vec2f) -> vec4f {      // fc = pixel position, origin top-left, y do
   - `G.centroid` (bright vs dark sound -> colour temperature), `G.flux` (busy-ness -> particle count/speed),
     `G.energy` (quiet verse vs big chorus -> how much of the scene is "on"), `G.drop` (a big moment: go wild
     for ~1.4 s), `G.travel` (use as distance for anything that flies forward), `key(k)` (piano keys glowing).
+- **Every part of the song looks different.** The app tells the shader which part of the song is
+  playing (`G.section`, see `common.wgsl`): Quiet (intro/outro), Verse, Build-up, Chorus, Breakdown,
+  Drop. Blend with `sec(SEC_X)` (0..1, cross-fades over 1.5 s; all six add up to 1), and use
+  `sec_progress(seconds)` for things that grow through a part (build-up tension). Each part should be
+  recognisable at a glance, by what is in the scene, not just by brightness:
+  - **Quiet:** pared back, dim and slow, most elements off. A calm establishing shot.
+  - **Verse:** the look's base scene, moderate.
+  - **Build-up:** tension climbing with `sec_progress(~12)`: things converge, charge, tighten, heat up,
+    speed up; snare hits flash. It should feel like something is about to happen.
+  - **Drop:** the payoff. Something appears that only the drop has (an element, a camera move, a
+    colour flip), at full intensity, aggressive.
+  - **Breakdown:** drums gone, emotional and airy: things dissolve or float, wide space, soft light,
+    melody (`G.mid`, `key(k)`, `spec`) drives it.
+  - **Chorus:** big, full and bright, every layer on, but uplifting and open rather than aggressive,
+    so it doesn't look like the drop.
 - **Silence still looks beautiful** (slow idle motion), loud music looks spectacular.
 - **Mouse control** (`G.mouse_on == 1`): the scene should respond to `G.mouse` (0..1): steer a camera,
   light follows the cursor, creatures look at it or flee, etc. `G.click_pos` + `G.click_age` (seconds since
@@ -51,7 +66,9 @@ fn look(fc: vec2f) -> vec4f {      // fc = pixel position, origin top-left, y do
 tools\shots\viz-shots.exe --shots <out folder> shaders\looks\your_look.wgsl
 ```
 
-renders 8 seconds of a synthetic 128 BPM song (kick, snare, hats, wobbling sub, chords, piano notes; a
-breakdown then a drop) and saves `<out folder>\your_look.png`: three frames side by side
-(2 s groove | 6.5 s breakdown | 8 s right after the drop, with a simulated mouse and click).
+plays a synthetic 128 BPM song with a real arrangement (intro, verse, build-up, drop, breakdown, verse,
+chorus, outro; 82 s, rendered off-screen in a few seconds) and saves `<out folder>\your_look.png`, a 4x2 grid:
+top row Quiet (intro) | Verse | Build-up (late) | Drop (just after it hits);
+bottom row Breakdown | Chorus | Breakdown (outro) | Drop with a simulated mouse and click.
+The first look in a run also prints which section the detector saw when.
 Shader errors are printed with line numbers. It also prints a rough ms/frame.

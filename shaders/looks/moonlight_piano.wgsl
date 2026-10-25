@@ -6,6 +6,8 @@
 // pal2 = moonlight.
 
 fn mp_sq(x: f32) -> f32 { return x * x; }
+// build-up tension 0..1 (stays 1 while the build fades out into the drop)
+fn mp_bprog() -> f32 { return select(1.0, sec_progress(12.0), G.section == SEC_BUILD) * sec(SEC_BUILD); }
 const MP_H: f32 = -0.12;   // horizon (centred coords, y up)
 const MP_KB: f32 = -0.80;  // top edge of the keyboard
 
@@ -53,11 +55,19 @@ fn mp_sky(q: vec2f, moon: vec2f) -> vec3f {
     let A = G.aspect;
     let px = 2.0 / G.res.y;
     let hh = q.y - MP_H;
+    let sQ = sec(SEC_QUIET);
+    let sB = sec(SEC_BUILD);
+    let sC = sec(SEC_CHORUS);
+    let sK = sec(SEC_BREAKDOWN);
+    let sD = sec(SEC_DROP);
+    let bp = mp_bprog();
 
     // gradient, warmer when the sound is bright (centroid)
     let top = mix(vec3f(0.004, 0.008, 0.030), vec3f(0.014, 0.008, 0.030), G.centroid);
     let low = mix(vec3f(0.030, 0.055, 0.140), vec3f(0.090, 0.065, 0.130), G.centroid);
     var col = mix(low, top, smoothstep(0.0, 1.0, hh));
+    col *= 1.0 - 0.35 * sQ - 0.4 * sK - 0.2 * bp;                                           // quiet/breakdown: darker sky so the rest glows
+    col += mix(vec3f(0.30, 0.13, 0.07), G.pal1.rgb * 0.25, 0.4) * sC * exp(-max(hh, 0.0) * 2.2);   // chorus: golden dawn glow on the horizon
     col += G.pal0.rgb * 0.07 * exp(-max(hh, 0.0) * 4.0);
     let md = length(q - moon);
     col += G.pal2.rgb * (0.06 * exp(-md * 2.0) + 0.10 * exp(-md * 6.5)) * (1.0 - mmask0(md)) * (0.8 + 0.5 * G.bass);
@@ -80,7 +90,7 @@ fn mp_sky(q: vec2f, moon: vec2f) -> vec3f {
     let btw = 0.6 + 0.4 * sin(t * (0.7 + 2.0 * hash21(bc)) + bh * 30.0) + G.high * 0.6;
     let spike = exp(-abs(bo.x) * 90.0) * exp(-abs(bo.y) * 9.0) + exp(-abs(bo.y) * 90.0) * exp(-abs(bo.x) * 9.0);
     stars += step(0.86, bh) * btw * (exp(-dot(bo, bo) * 1200.0) * 2.5 + spike * 0.35) * (0.7 + 0.6 * G.energy);
-    stars *= smoothstep(0.02, 0.35, hh) * (1.0 - cloud) * smoothstep(0.14, 0.3, md);
+    stars *= smoothstep(0.02, 0.35, hh) * (1.0 - cloud) * smoothstep(0.14, 0.3, md) * (1.0 - 0.6 * sQ + 0.7 * sK + 0.8 * bp);
     col += vec3f(0.85, 0.9, 1.0) * stars;
 
     // constellation: one star per pitch class, lines light up between notes being played
@@ -104,7 +114,7 @@ fn mp_sky(q: vec2f, moon: vec2f) -> vec3f {
         pn = n;
         pg = g;
     }
-    con *= smoothstep(0.42, 0.52, hh);
+    con *= smoothstep(0.42, 0.52, hh) * (1.0 - 0.7 * sQ + 1.2 * bp + 0.4 * sC);   // build: the whole constellation charges up
     }
     col += mix(G.pal2.rgb, G.pal1.rgb, 0.35) * con * smoothstep(0.1, 0.3, hh) * (1.0 - 0.6 * cloud);
 
@@ -113,7 +123,7 @@ fn mp_sky(q: vec2f, moon: vec2f) -> vec3f {
     col = mix(col, ccol, cloud);
 
     // the moon: craters, maria, limb darkening, halo; halo ring on the beat, flare on the drop
-    let r = 0.115 * (1.0 + 0.02 * G.bass);
+    let r = 0.115 * (1.0 + 0.02 * G.bass) * (1.0 + 0.5 * bp + 0.22 * sC - 0.2 * sK);   // build: the moon swells; chorus: big; breakdown: small and distant
     let mq = (q - moon) / r;
     let ml = length(mq);
     let sph = sqrt(max(0.0, 1.0 - ml * ml));
@@ -127,13 +137,27 @@ fn mp_sky(q: vec2f, moon: vec2f) -> vec3f {
     let hasc = step(0.45, hash21(ci + 1.3));
     let crater = hasc * (smoothstep(crr, crr * 0.6, cdist) * 0.14 - smoothstep(0.06, 0.0, abs(cdist - crr)) * 0.1 * sign(fract(cgp).x - 0.5));
     let mtex = (0.88 + 0.25 * mfb) * (1.0 - 0.32 * maria) * (1.0 - crater);
-    let mcol = G.pal2.rgb * 1.2 * (0.62 + 0.38 * sph) * mtex;
+    var mcol = G.pal2.rgb * 1.2 * (0.62 + 0.38 * sph) * mtex;
+    mcol = mix(mcol, mcol * vec3f(1.5, 0.8, 0.55), 0.7 * bp);   // build: the moon heats up red
     let mmask = smoothstep(1.0, 1.0 - 2.0 * px / r, ml);
     let edge = max(md - r, 0.0);
     col = mix(col, mcol, mmask);
-    col += (1.0 - mmask) * G.pal2.rgb * (0.30 * exp(-edge * 16.0) + 0.14 * exp(-edge * 4.0)) * (0.75 + 0.5 * G.bass + 1.5 * G.drop);
+    col += (1.0 - mmask) * G.pal2.rgb * (0.30 * exp(-edge * 16.0) + 0.14 * exp(-edge * 4.0)) * (0.75 + 0.5 * G.bass + 1.5 * G.drop + 2.5 * bp + 0.8 * sC);
     let ringr = r * (1.25 + 1.6 * G.beat_phase);
-    col += G.pal2.rgb * exp(-abs(md - ringr) * 70.0) * (1.0 - G.beat_phase) * (0.12 + 0.3 * G.energy);
+    col += G.pal2.rgb * exp(-abs(md - ringr) * 70.0) * (1.0 - G.beat_phase) * (0.12 + 0.3 * G.energy) * (1.0 - 0.8 * sK);
+    // build: rings of light contract onto the moon, faster and brighter as the tension climbs
+    let cr = (1.0 - fract(t * (0.4 + 1.2 * bp))) * 1.6;
+    col += mix(G.pal2.rgb, vec3f(1.0, 0.5, 0.3), 0.5) * exp(-abs(md - cr) * 22.0) * bp * 0.5;
+    col += G.pal2.rgb * G.snare * sB * 0.12 * exp(-md * 1.5);
+    // DROP ONLY: aurora curtains across the sky and rays bursting out of the moon
+    if (sD > 0.01) {
+        let av = noise2(vec2f(q.x * 2.0 + t * 0.2, t * 0.1));
+        let ab = exp(-mp_sq((hh - 0.5 - 0.25 * av - 0.08 * sin(q.x * 4.0 + t)) * 4.5));
+        let ast = 0.5 + 0.5 * noise2(vec2f(q.x * 30.0, t * 0.5));
+        col += mix(vec3f(0.1, 1.0, 0.5), vec3f(0.9, 0.2, 0.95), smoothstep(0.2, 0.9, hh + 0.2 * av)) * ab * ast * smoothstep(0.08, 0.3, hh) * sD * (0.7 + 1.2 * G.kick);
+        let ra = atan2(q.y - moon.y, q.x - moon.x);
+        col += G.pal2.rgb * pow(abs(sin(ra * 8.0 + t * 0.3)), 14.0) * exp(-md * 1.6) * sD * (0.4 + 1.2 * G.kick) * (1.0 - mmask);
+    }
 
     // shooting stars: a slow idle one, and a big one on the drop
     let mp = t / 9.0;
@@ -166,11 +190,11 @@ fn mp_sky(q: vec2f, moon: vec2f) -> vec3f {
         var v2 = spec(bx2);
         if (e > 0) { v = hist(bx, fe * 0.12); v2 = hist(bx2, fe * 0.12); }
         let slope = (v2 - v) * 0.42 / (0.008 * A);
-        let yl = base + v * 0.42 + fe * 0.03;
+        let yl = base + v * 0.42 * (1.0 + 0.6 * bp + 0.25 * sC) + fe * 0.03;
         let dy = abs(q.y - yl) / sqrt(1.0 + slope * slope);
         let w = 1.0 - fe / 6.0;
         let lc = mix(G.pal1.rgb, mix(G.pal1.rgb, G.pal0.rgb * 2.0, 0.5), fe / 5.0);
-        mel += lc * w * w * (exp(-dy * dy / (px * px * 1.2)) * 1.1 + 0.0008 / (dy + 0.004)) * (0.5 + 0.6 * G.mid + G.drop);
+        mel += lc * w * w * (exp(-dy * dy / (px * px * 1.2)) * 1.1 + 0.0008 / (dy + 0.004)) * (0.5 + 0.6 * G.mid + G.drop) * (1.0 - 0.9 * sQ - 0.65 * sK + 1.2 * bp + 0.6 * sC + 0.4 * sD);
     }
     }
     col += mel * smoothstep(0.0, 0.06, hh);
@@ -191,7 +215,7 @@ fn mp_sky(q: vec2f, moon: vec2f) -> vec3f {
 
     // sky lanterns rising (more when the section is big), flicker with the mids, one more from each click
     var lan = vec3f(0.0);
-    let nl = i32(6.0 + 8.0 * G.energy + 3.0 * G.quality);
+    let nl = min(i32((6.0 + 8.0 * G.energy + 3.0 * G.quality + 9.0 * sC + 5.0 * sK) * (1.0 - 0.85 * sQ)), 30);
     for (var i = 0; i < nl; i++) {
         let fi = f32(i);
         let P = 18.0 + 10.0 * hash11(fi * 3.3);
@@ -214,8 +238,15 @@ fn mp_sky(q: vec2f, moon: vec2f) -> vec3f {
 
 fn look(fc: vec2f) -> vec4f {
     let uv = fc / G.res;
-    let q = centered(fc);
+    let sQ = sec(SEC_QUIET);
+    let sB = sec(SEC_BUILD);
+    let sC = sec(SEC_CHORUS);
+    let sK = sec(SEC_BREAKDOWN);
+    let sD = sec(SEC_DROP);
+    let bp = mp_bprog();
     let t = G.time;
+    let shk = (vec2f(noise2(vec2f(t * 25.0, 1.0)), noise2(vec2f(t * 25.0, 9.0))) - 0.5) * (0.006 * bp + 0.014 * sD * G.kick);
+    let q = centered(fc) + shk;
     let A = G.aspect;
     let px = 2.0 / G.res.y;
     let moon = mp_moon();
@@ -278,7 +309,7 @@ fn look(fc: vec2f) -> vec4f {
         let glint = pow(gl, 9.0) * 10.0;
         col += G.pal2.rgb * path * (0.06 + glint * (0.45 + 1.4 * G.high)) * above;
 
-        col += mix(G.pal2.rgb, G.pal1.rgb, 0.45) * rip * 0.55;
+        col += mix(G.pal2.rgb, G.pal1.rgb, 0.45) * rip * (0.55 + 0.7 * sK);
 
         // shoreline glint that traces the waveform
         let sl = MP_H - 0.006 + wave(clamp(q.x / A * 0.5 + 0.5, 0.0, 1.0)) * 0.006;
@@ -309,7 +340,7 @@ fn look(fc: vec2f) -> vec4f {
         if (fw >= 0.0 && fw < 36.0) {
             let w = i32(floor(fw));
             let f = fract(fw);
-            let gw = key(mp_wkey(w));
+            let gw = min(key(mp_wkey(w)) * (1.0 + 0.8 * sK), 1.0);
             let gap = smoothstep(0.0, 0.05, f) * smoothstep(1.0, 0.95, f);
             var c = vec3f(0.30, 0.31, 0.36) * (0.75 + 0.25 * smoothstep(0.0, 0.3, ky)) * (1.0 - 0.45 * smoothstep(0.88, 0.95, ky));
             c += G.pal2.rgb * 0.15 * exp(-abs(q.x - moon.x) * 2.0) * smoothstep(0.35, 0.1, ky);  // moon sheen
@@ -329,7 +360,7 @@ fn look(fc: vec2f) -> vec4f {
             }
             col = c;
             // glow spilling out of lit keys
-            col += G.pal1.rgb * gw * 0.3 * exp(-ky * 3.0);
+            col += G.pal1.rgb * gw * (0.3 + 0.9 * sK) * exp(-ky * 3.0);
         }
         // felt strip and a gold edge breathing with the energy
         col = mix(col, vec3f(0.12, 0.02, 0.03), smoothstep(0.045, 0.035, ky));
@@ -340,7 +371,7 @@ fn look(fc: vec2f) -> vec4f {
     if (q.y > MP_KB) {
         let fw = mp_fw(q.x);
         let hy = q.y - MP_KB;
-        let bh = 0.45 + 0.9 * G.energy + 0.8 * G.drop;
+        let bh = 0.45 + 0.9 * G.energy + 0.8 * G.drop + 1.5 * sK + 0.5 * sC;   // breakdown: the keys' beams soar high into the sky
         let shim = 0.7 + 0.3 * noise2(vec2f(fw * 3.0, q.y * 7.0 - t * 2.5));
         var beam = vec3f(0.0);
         if (fw >= 0.0 && fw < 36.0) {
@@ -353,11 +384,11 @@ fn look(fc: vec2f) -> vec4f {
                 beam += mix(G.pal1.rgb, G.pal0.rgb * 2.5, 0.5) * key(bk) * exp(-mp_sq((fw - f32(b)) * 5.0));
             }
         }
-        col += beam * shim * exp(-hy / bh) * (0.8 + 0.4 * G.beat) * 0.7;
+        col += beam * shim * exp(-hy / bh) * (0.8 + 0.4 * G.beat * (1.0 - sK)) * 0.7 * (1.0 + 1.8 * sK + 0.3 * sC - 0.4 * sQ);
     }
 
     // fireflies over the shore and the water: more and faster when the music is busy (flux)
-    let nf = i32(10.0 + (14.0 + 10.0 * G.quality) * G.flux);
+    let nf = i32((10.0 + (14.0 + 10.0 * G.quality) * G.flux) * (1.0 - 0.8 * sQ - 0.6 * sK + 0.5 * sC));
     var ff = 0.0;
     for (var i = 0; i < nf; i++) {
         let fi = f32(i);
@@ -372,6 +403,13 @@ fn look(fc: vec2f) -> vec4f {
 
     // soft trails above the keyboard (moon dragged by the mouse, fireflies)
     if (q.y > MP_KB) { col = max(col, prev(uv) * 0.6); }
+
+    // colour treatment per section
+    col = mix(col, vec3f(luma(col)) * vec3f(0.8, 0.95, 1.2), 0.3 * sQ);
+    col *= mix(vec3f(1.0), vec3f(1.12, 1.03, 0.88), sC);
+    col *= mix(vec3f(1.0), vec3f(1.15, 0.85, 1.3), 0.5 * sD);
+    col += vec3f(0.9, 0.2, 0.1) * 0.12 * bp * pow(length(uv - 0.5) * 1.3, 2.0) * (0.5 + 0.5 * (1.0 - G.beat_phase));
+    col += G.pal2.rgb * G.snare * sB * 0.06;
 
     // vignette + grain
     let vg = 1.0 - 0.35 * pow(length(uv - 0.5) * 1.3, 2.5);

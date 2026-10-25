@@ -185,14 +185,34 @@ fn look(fc0: vec2f) -> vec4f {
     let gl = G.drop * step(0.6, hash21(vec2f(bid, gt)));
     let fc = fc0 + vec2f((hash21(vec2f(bid, gt + 3.0)) - 0.5) * gl * 0.12 * res.x, 0.0);
     let uv0 = fc0 / res;
+
+    // ---- song sections: weights (cross-fade) ----
+    let wq = sec(SEC_QUIET); let wv = sec(SEC_VERSE); let wb = sec(SEC_BUILD);
+    let wc = sec(SEC_CHORUS); let wk = sec(SEC_BREAKDOWN); let wd = sec(SEC_DROP);
+    let bprog = select(1.0, sec_progress(12.0), G.section == SEC_BUILD) * wb;   // build-up tension 0..1
+    let cityK = wq * 0.12 + wv + wb * (0.5 + 0.5 * bprog) + wc * 1.5 + wk * 0.25 + wd * 1.3;
+    let virK = wv + wb * bprog * 1.2 + wc * 0.8 + wd * 1.5;
+    let speedK = wq * 0.3 + wv + wb * (1.0 + 2.0 * bprog) + wc * 1.2 + wk * 0.5 + wd * 1.6;
+    let Rk = wq * 1.1 + wv + wb * (1.0 - 0.38 * bprog) + wc * 1.3 + wk * 1.5 + wd * 0.85;
+    let wormK = wq * 0.5 + wv + wb * (1.0 + 0.9 * bprog) + wc * 1.1 + wk * 0.6 + wd * 1.4;
+    let expo = wq * 0.55 + wv + wb * (0.9 + 0.2 * bprog) + wc * 1.15 + wk * 0.8 + wd * 1.2;
+
     var p = centered(fc);
+    // build-up: the screen shakes harder as the charge builds
+    p += vec2f(sin(G.time * 47.0), cos(G.time * 53.0)) * (0.003 + 0.004 * G.snare) * bprog * bprog;
     p *= 1.0 + 0.03 * dot(p, p);            // CRT barrel
     let pxs = 2.0 / res.y;
 
-    let cclean = mix(G.pal0.rgb, G.pal2.rgb, 0.35 * G.centroid);
-    let cinf = G.pal1.rgb;
-    let cneu = G.pal2.rgb;
-    let infect = clamp(0.06 + 0.4 * G.energy + 0.4 * G.drop, 0.0, 0.9);
+    var cclean = mix(G.pal0.rgb, G.pal2.rgb, 0.35 * G.centroid);
+    var cinf = G.pal1.rgb;
+    var cneu = G.pal2.rgb;
+    cclean = mix(cclean, cneu, 0.3 * wc + 0.25 * wk);                 // chorus/breakdown: lighter, airier
+    cinf = mix(cinf, cneu, 0.2 * wk);
+    let cc0 = cclean; let ci0 = cinf;
+    cclean = mix(cc0, ci0, wd);                                       // drop: colour flip, bus turns magenta
+    cinf = mix(ci0, cc0, wd);
+    var infect = 0.06 + 0.4 * G.energy + 0.4 * G.drop + 0.5 * bprog + 0.4 * wd - 0.2 * (wq + wk + wc);
+    infect = clamp(infect, 0.0, 0.9);
 
     // camera: mouse steers the look direction
     let mo = G.mouse - vec2f(0.5);
@@ -207,7 +227,7 @@ fn look(fc0: vec2f) -> vec4f {
 
     // ---------------- The worm (screen space at the vanishing point) ----------------
     let lunge = G.drop * G.drop;
-    let S = 0.17 * (1.0 + 0.12 * G.bass + 0.05 * G.kick) * (1.0 + 3.5 * lunge);
+    let S = 0.17 * wormK * (1.0 + 0.12 * G.bass + 0.05 * G.kick) * (1.0 + 3.5 * lunge);
     var dev = vec3f(0.0);
     let dq = p - vp;
     if (G.drop > 0.03) {
@@ -216,10 +236,11 @@ fn look(fc0: vec2f) -> vec4f {
     } else {
         dev = ar_dev(dq, S, pxs * 1.3, cinf, cneu);
     }
+    dev *= wq * 0.6 + wv + wb + wc * 1.1 + wk * 0.4 + wd * 0.8;
     let occl = smoothstep(S * 1.0, S * 1.5, length(dq));   // the head hides what is behind it
 
     // ---------------- the city below ----------------
-    var col = ar_city(ro, rd, pxw, infect, cclean, cinf) * 0.6 * (0.5 + 0.6 * G.energy + 0.2) * occl;
+    var col = ar_city(ro, rd, pxw, infect, cclean, cinf) * 0.6 * (0.5 + 0.6 * G.energy + 0.2) * occl * cityK;
 
     // ---------------- the Data Bus tunnel ----------------
     let m0 = max(max(abs(rd.x), abs(rd.y)), (abs(rd.x) + abs(rd.y)) * 0.7071);
@@ -228,7 +249,7 @@ fn look(fc0: vec2f) -> vec4f {
     let t0 = AR_R / m0;
     let age = clamp(t0 * rd.z / 55.0, 0.0, 1.0);
     let def = hist(0.03 + 0.85 * bx, age);
-    let R = AR_R * (1.0 + 0.5 * def * def + 0.07 * G.bass + 0.05 * G.kick * (1.0 - age));
+    let R = AR_R * Rk * (1.0 + 0.5 * def * def + 0.07 * G.bass + 0.05 * G.kick * (1.0 - age));
     let t = R / m0;
     let hit = rd * t;
     let zw = ro.z + hit.z;
@@ -249,7 +270,7 @@ fn look(fc0: vec2f) -> vec4f {
     let dz1 = abs(fract(zw + 0.5) - 0.5);
     let dz6 = abs(fract(zw / 6.0 + 0.5) - 0.5) * 6.0;
     tun += ar_ln(dz1, fz * 1.2) * 0.3 * clamp(1.0 - fz * 4.0, 0.0, 1.0);
-    let major = ar_ln(dz6, fz * 2.2) * (0.9 + 1.2 * G.snare);
+    let major = ar_ln(dz6, fz * 2.2) * (0.9 + 1.2 * G.snare + 0.6 * wc * G.beat + 1.5 * bprog * G.snare);
     // rails: odd lanes are the octagon corners
     let corner = abs(li % 2.0) > 0.5;
     tun += ar_ln(da, fa * 1.3) * select(0.35, 0.9, corner);
@@ -264,8 +285,8 @@ fn look(fc0: vec2f) -> vec4f {
     }
     // data packets streaking toward us along the rails (count/speed from flux)
     let lane = (li % 16.0 + 16.0) % 16.0;
-    let act = step(hash11(lane * 3.7 + floor(G.time * 0.8)), 0.3 + 0.65 * G.flux);
-    let spd = 10.0 + 12.0 * hash11(lane) + 25.0 * G.flux + 30.0 * G.drop;
+    let act = step(hash11(lane * 3.7 + floor(G.time * 0.8)), clamp(0.3 + 0.65 * G.flux + 0.4 * bprog + 0.3 * wd - 0.25 * (wq + wk), 0.0, 1.0));
+    let spd = (10.0 + 12.0 * hash11(lane) + 25.0 * G.flux + 30.0 * G.drop) * speedK;
     let g = fract((zw + G.time * spd) / 16.0 + hash11(lane * 1.3));
     let head = smoothstep(0.0, 0.01, g) * smoothstep(0.12, 0.0, g);
     let pkt = act * head * (ar_ln(da, fa * 2.5) * 2.0);
@@ -276,17 +297,34 @@ fn look(fc0: vec2f) -> vec4f {
     let bcell = vec2f(floor(la + 0.5), floor(zw));
     let one = hash21(bcell + floor(G.time * (1.0 + 10.0 * G.hat))) > 0.5;
     let fpb = max(fa / (R * TAU / 16.0), fz);
-    let bvis = clamp(1.0 - fpb * 9.0, 0.0, 1.0) * smoothstep(3.0, 9.0, zrel) * step(hash21(bcell + 5.0), 0.3 + 0.5 * G.high);
+    let bvis = clamp(1.0 - fpb * 9.0, 0.0, 1.0) * smoothstep(3.0, 9.0, zrel) * step(hash21(bcell + 5.0), 0.3 + 0.5 * G.high + 0.3 * wk) * (1.0 + 1.5 * wk * (0.5 + G.mid));
     wl += wcol * clamp(1.0 - ar_bit(lpb, one) / (0.05 + fpb * 1.5), 0.0, 1.0) * bvis * 0.35;
     // click: scan ring fired down the tunnel
     let sz = G.click_age * 45.0;
     wl += cneu * ar_ln(abs(zrel - sz), fz * 3.0) * 2.5 * exp(-G.click_age * 1.2) * step(G.click_age, 3.0);
     col += wl * fog * occl;
+    // breakdown only: soft melody lights drifting in the wide tunnel
+    if (wk > 0.01) {
+        for (var i = 0; i < 7; i++) {
+            let fi = f32(i);
+            let hh = hash11(fi * 5.3 + 1.0);
+            let oc = vec2f((hh - 0.5) * 1.5 * AR_F + 0.18 * sin(G.time * 0.3 + fi * 2.0), fract(hash11(fi * 2.9) + G.time * 0.03 * (0.5 + hh)) * 2.0 - 1.0);
+            let kv = key(30 + i32(fi) * 6) + spec(0.15 + 0.1 * fi);
+            col += mix(cclean, cneu, 0.5) * glow(length(p - oc), 0.015 + 0.03 * kv) * (0.15 + 1.2 * kv) * wk * 0.5;
+        }
+        col += cclean * 0.06 * wk * (0.4 + G.mid) * exp(-length(dq) * 0.8);
+    }
+    // drop only: breach beams fan out from the worm's mouth
+    if (wd > 0.01) {
+        let thb = atan2(dq.y, dq.x);
+        let bm = pow(abs(sin(thb * 7.0 + G.time * 0.5)), 24.0) + pow(abs(sin(thb * 13.0 - G.time * 0.8)), 40.0) * 0.6;
+        col += mix(cneu, cinf, 0.5) * bm * exp(-length(dq) * 0.9) * wd * (0.2 + 0.6 * G.kick + 0.3 * G.bass);
+    }
     // dim glow from the far end
     col += cinf * 0.05 * exp(-length(dq) * 2.0) * (0.5 + G.energy);
 
     // ---------------- wireframe viruses: deleted in bursts on the kick ----------------
-    let nv = 8 + i32(G.quality) * 3;
+    let nv = i32(ceil(f32(8 + i32(G.quality) * 3) * clamp(virK, 0.0, 1.0)));
     var vir = vec3f(0.0);
     for (var i = 0; i < nv; i++) {
         let fi = f32(i);
@@ -353,7 +391,7 @@ fn look(fc0: vec2f) -> vec4f {
             vir += cinf * 0.1 * exp(-length(lq) * 2.5) * fadez;
         }
     }
-    col += vir;
+    col += vir * min(virK, 1.5);
     col += dev;
 
     // ---------------- HUD (vector segments) ----------------
@@ -410,18 +448,21 @@ fn look(fc0: vec2f) -> vec4f {
     // reticle at the centre: brackets snap open on the kick, ring turns with the beat
     let rq = p;
     let rr = length(rq);
-    let spread = 0.07 + 0.035 * G.kick + 0.05 * G.drop;
+    let spread = (0.07 + 0.035 * G.kick + 0.05 * G.drop) * (1.0 - 0.45 * bprog) + 0.04 * wc * G.beat;
     let rcol = mix(cclean, cinf, G.drop);
     let rth = atan2(rq.y, rq.x) + G.beat_phase * PI * 0.5;
     let rseg = step(0.3, abs(fract(rth / TAU * 4.0) - 0.5));
     hud += rcol * ar_ln(abs(rr - spread), pxs * 1.4) * rseg * 0.9;
     hud += rcol * ar_ln(length(rq), pxs * 2.0) * 0.6;
+    // build-up: a charge ring fills clockwise over the 12 s
+    let cfrac = fract(0.25 - atan2(rq.y, rq.x) / TAU);
+    hud += mix(cneu, cinf, bprog) * ar_ln(abs(rr - 0.2), pxs * 1.6) * step(cfrac, bprog) * wb * (1.0 + 2.0 * G.snare);
     // click: screen-space scan ring
     let cq = (uv0 - G.click_pos) * vec2f(hw, 1.0);
     let cr = G.click_age * 1.4;
     hud += cneu * ar_ln(abs(length(cq) - cr), hpx * 2.0) * exp(-G.click_age * 2.0) * 2.0;
     hud += cclean * ar_ln(abs(length(cq) - cr * 0.7), hpx * 1.5) * exp(-G.click_age * 2.5);
-    col += hud;
+    col += hud * (0.45 + 0.55 * (1.0 - wq));
 
     // drop: RGB split of the last frame
     if (G.drop > 0.02) {
@@ -432,7 +473,7 @@ fn look(fc0: vec2f) -> vec4f {
 
     // CRT: scanlines, grain, vignette, soft corners
     let sl = 0.78 + 0.22 * sin(fc0.y / max(res.y / 405.0, 1.0) * PI);
-    col *= sl * (1.0 + 0.1 * G.hat);
+    col *= sl * (1.0 + 0.1 * G.hat) * expo;
     col += (hash21(fc0 + fract(G.time) * 97.0) - 0.5) * 0.025;
     let vq = uv0 - 0.5;
     col *= clamp(1.0 - dot(vq, vq) * 1.4, 0.0, 1.0);

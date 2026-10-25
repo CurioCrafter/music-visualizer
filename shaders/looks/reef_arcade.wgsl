@@ -235,6 +235,13 @@ fn look(fc: vec2f) -> vec4f {
     let bc = floor(G.beat_count);
     let ph = G.beat_phase;
     let act = smoothstep(0.02, 0.08, G.energy);
+    // song-section weights, build-up tension 0..1 over ~12 s
+    let nq = sec(SEC_QUIET); let nb = sec(SEC_BUILD); let nc = sec(SEC_CHORUS);
+    let nd = sec(SEC_BREAKDOWN); let np = sec(SEC_DROP);
+    let bpg = sec_progress(12.0) * nb;
+    let hunt = act * clamp(1.0 - nq - nd, 0.0, 1.0);     // spear hunting only while the drums are in
+    let bayer = rh_bayer(floor(fc / ps));
+    let bossOn = G.drop > 0.03 || np > 0.4;
     let shk = floor((hash22(vec2f(floor(t * 24.0), 3.0)) - 0.5) * 5.0 * G.drop) + vec2f(0.0, floor(G.kick * 1.6));
     let v = pix + 0.5 + shk;
     let dep = clamp(v.y / RH_VH, 0.0, 1.0);
@@ -243,12 +250,18 @@ fn look(fc: vec2f) -> vec4f {
     var col = mix(vec3f(0.16, 0.6, 0.85), vec3f(0.02, 0.09, 0.28), pow(dep, 0.75));
     col *= mix(vec3f(0.85, 1.0, 1.12), vec3f(1.12, 1.02, 0.85), G.centroid);
     col *= 0.78 + 0.3 * G.energy;
+    let deep = pow(dep, 0.8);
+    col = mix(col, col * vec3f(0.45, 0.55, 0.8), 0.7 * nq);                                                  // quiet: dark, still
+    col = mix(col, mix(vec3f(0.55, 0.92, 1.0), vec3f(0.12, 0.42, 0.62), deep), 0.75 * nd);                   // breakdown: pale, airy
+    col = mix(col, mix(vec3f(0.3, 0.88, 0.95), vec3f(0.05, 0.38, 0.62), deep) * 1.15, 0.65 * nc);            // chorus: bright turquoise
+    col = mix(col, col * vec3f(1.0, 0.5, 0.6) * 0.85, 0.75 * bpg);                                           // build-up: danger red
+    col = mix(col, mix(vec3f(0.55, 0.1, 0.38), vec3f(0.1, 0.0, 0.18), pow(dep, 0.7)), 0.8 * np);             // drop: magenta storm
 
     // ---- light shafts fanning from the sun, breathing with the sub ----
     let sunx = W * 0.66 + sin(t * 0.07) * 25.0;
     let ray = (v.x - sunx) / (v.y + 25.0);
     let shaft = smoothstep(0.5, 0.85, noise2(vec2f(ray * 7.0, t * 0.18))) * smoothstep(0.2, 0.6, noise2(vec2f(ray * 2.5 + 5.0, t * 0.11)));
-    col += vec3f(0.45, 0.85, 0.9) * shaft * pow(1.0 - dep, 1.3) * (0.22 + 0.45 * G.bass + 0.2 * G.beat);
+    col += vec3f(0.45, 0.85, 0.9) * shaft * pow(1.0 - dep, 1.3) * (0.22 + 0.45 * G.bass + 0.2 * G.beat) * (1.0 + 1.3 * nc + 1.6 * nd - 0.7 * nq);
 
     // ---- surface: waves shaped by the waveform, sun glints sparkle on hats ----
     let sy = 9.0 + 2.0 * sin(v.x * 0.07 + t * 1.3) + 1.2 * sin(v.x * 0.19 - t * 2.1) + wave(v.x / W) * 4.0;
@@ -259,7 +272,7 @@ fn look(fc: vec2f) -> vec4f {
         if (gl > 0.95 - G.hat * 0.15) { sc = vec3f(1.7); }
         col = sc;
     } else if (v.y < sy + 1.0) { col = vec3f(0.9, 1.0, 1.0); }
-    col += vec3f(1.0, 0.95, 0.7) * 0.9 * exp(-length((v - vec2f(sunx, 0.0)) * vec2f(1.0, 1.6)) / 14.0);
+    col += vec3f(1.0, 0.95, 0.7) * 0.9 * exp(-length((v - vec2f(sunx, 0.0)) * vec2f(1.0, 1.6)) / (14.0 + 18.0 * nc + 10.0 * nd));
 
     // ---- far reef silhouette: an echo of the spectrum 1.6 s ago ----
     let fh = 30.0 + 18.0 * fbm2(vec2f(v.x * 0.03 + G.travel * 0.03, 2.0), 3) + 18.0 * hist(v.x / W, 0.5);
@@ -292,19 +305,40 @@ fn look(fc: vec2f) -> vec4f {
 
     // ---- reef fish school: more fish in big sections, scatter on snares ----
     let scen = vec2f(W * 0.55 + sin(t * 0.17) * W * 0.25, 54.0 + sin(t * 0.29) * 14.0);
-    let nf = 10 + i32(G.energy * 14.0);
+    let nf = i32((10.0 + G.energy * 14.0) * clamp(1.0 - 0.75 * nq - 0.9 * nd, 0.0, 1.0) + 8.0 * nc);
     for (var i = 0; i < 24; i++) {
         if (i >= nf) { break; }
         let fi = f32(i);
         let hs = hash11(fi * 1.37 + 0.5);
         let a = t * (0.5 + hs * 0.5) + fi * 2.39 + G.travel * 0.08;
-        let rad = 7.0 + hash11(fi * 3.3) * 18.0 + G.snare * 10.0;
+        let rad = (7.0 + hash11(fi * 3.3) * 18.0 + G.snare * 10.0) * (1.0 - 0.65 * bpg) * (1.0 + 0.35 * nc);
         let fp = floor(scen + vec2f(cos(a) * rad, sin(a) * rad * 0.45));
         let fd = select(1.0, -1.0, sin(a) > 0.0);
         let fq = (v - fp - 0.5) * vec2f(fd, 1.0);
         if (abs(fq.x) < 5.0 && abs(fq.y) < 3.0) {
             let fcol = rh_fish(fq, select(vec3f(1.0, 0.85, 0.15), vec3f(0.2, 0.5, 1.0), i % 3 == 0));
             if (fcol.a > 0.5) { col = fcol.rgb; }
+        }
+    }
+
+    // ---- breakdown only: jellyfish drifting up, pulsing with the melody ----
+    if (nd > 0.03) {
+        for (var i = 0; i < 4; i++) {
+            let fi = f32(i);
+            let jp = floor(vec2f(W * (0.14 + 0.24 * fi) + sin(t * 0.3 + fi * 2.0) * 10.0, 150.0 - fract(t * 0.012 + fi * 0.27) * 150.0));
+            let jq = v - jp;
+            let kv = key(30 + i * 12);
+            let pul = 1.0 + 0.15 * sin(t * 2.2 + fi) + 0.3 * kv;
+            var jc = vec3f(0.0);
+            var hit_j = false;
+            if (jq.y < 1.0 && jq.y > -9.0 * pul && length(vec2f(jq.x / (9.0 * pul), jq.y / (7.0 * pul))) < 1.0) {
+                jc = mix(vec3f(1.0, 0.7, 0.95), G.pal2.rgb, 0.5 + 0.5 * sin(fi + jq.y * 0.2)) * (0.9 + 0.8 * kv);
+                hit_j = true;
+            } else if (jq.y >= 1.0 && jq.y < 16.0 && abs(jq.x) < 8.0) {
+                let tx = jq.x - sin(jq.y * 0.35 - t * 2.0 + fi) * 1.5;
+                if (abs(tx - floor(tx / 3.0) * 3.0 - 1.0) < 0.6) { jc = vec3f(0.9, 0.75, 1.0) * (0.6 + 0.8 * kv); hit_j = true; }
+            }
+            if (hit_j && bayer < nd) { col = jc; }
         }
     }
 
@@ -434,7 +468,7 @@ fn look(fc: vec2f) -> vec4f {
     let tl = rh_lpos(tk, t, bc, W);
     let ddir = select(-1.0, 1.0, tl.x >= dpos.x);
     let gtip = dpos + vec2f(16.0 * ddir, 2.8);
-    let hit = step(0.28, ph) * act * step(8.0, tl.x) * step(tl.x, W - 8.0);
+    let hit = step(0.28, ph) * hunt * step(8.0, tl.x) * step(tl.x, W - 8.0);
 
     // lionfish, fins flaring with sub + kick
     let flare = G.bass * 0.7 + G.kick * 0.7;
@@ -447,12 +481,24 @@ fn look(fc: vec2f) -> vec4f {
                 if (ph > 0.75) { lc.a = 0.0; }
                 else if (fract(ph * 14.0) < 0.5) { lc = vec4f(vec3f(1.8), lc.a); }
             }
-            if (lc.a > 0.5) { col = lc.rgb; }
+            if (lc.a > 0.5 && bayer >= nq + nd) { col = lc.rgb; }
+        }
+    }
+
+    // build-up: a huge lionfish shadow slides in from the right as tension climbs
+    if (bpg > 0.03) {
+        let sbs = 2.2 + 2.0 * bpg;
+        let sp = floor(vec2f(W + 40.0 - bpg * W * 0.3, 74.0 + sin(t * 1.1) * 6.0));
+        let sq3 = (v - sp) * vec2f(-1.0, 1.0);
+        if (abs(sq3.x) < 15.0 * sbs && abs(sq3.y) < 12.5 * sbs) {
+            let sc3 = rh_lion(sq3, sbs, 0.4 + G.snare, t);
+            if (sc3.a > 0.5 && bayer < bpg * 1.6) { col = RH_INK * 1.6 + vec3f(0.45, 0.02, 0.05) * (0.3 + G.snare + 0.4 * G.beat); }
+            if (length(sq3 / sbs - vec2f(3.4, -0.5)) < 0.75 && bayer < bpg * 1.6) { col = vec3f(2.0, 0.2, 0.1); }
         }
     }
 
     // boss lionfish on the drop: huge, flashes on every kick, health drains as the drop fades
-    if (G.drop > 0.03) {
+    if (bossOn) {
         let bs = 4.2;
         let bpos = floor(vec2f(W * 0.7 + pow(G.drop, 4.0) * 90.0 + sin(t * 1.3) * 6.0, 72.0 + sin(t * 0.9) * 10.0));
         let bq = (v - bpos) * vec2f(-1.0, 1.0);
@@ -460,7 +506,7 @@ fn look(fc: vec2f) -> vec4f {
             var bcl = rh_lion(bq, bs, G.bass + G.kick + 0.4, t);
             bcl = vec4f(mix(bcl.rgb * vec3f(0.85, 0.7, 0.8), vec3f(1.8), G.kick * 0.7), bcl.a);
             if (length(bq / bs - vec2f(3.4, -0.5)) < 0.75) { bcl = vec4f(2.2, 0.25, 0.1, 1.0); }
-            if (G.drop < 0.15 && fract(t * 12.0) < 0.5) { bcl.a = 0.0; }
+            if (G.drop < 0.15 && np < 0.4 && fract(t * 12.0) < 0.5) { bcl.a = 0.0; }
             if (bcl.a > 0.5) { col = bcl.rgb; }
         }
     }
@@ -474,7 +520,7 @@ fn look(fc: vec2f) -> vec4f {
 
     // spear flight + rope, burst, +100 popup
     let onscr = step(8.0, tl.x) * step(tl.x, W - 8.0);
-    if (act * onscr > 0.5 && ph < 0.75) {
+    if (hunt * onscr > 0.5 && ph < 0.75) {
         let prog = smoothstep(0.0, 0.28, ph);
         let tgt = floor(tl.xy) + 0.5;
         let sdir = normalize(tgt - gtip + vec2f(1e-4, 0.0));
@@ -512,8 +558,28 @@ fn look(fc: vec2f) -> vec4f {
         }
     }
 
+    // ---- drop only: lightning bolts crack down from the surface ----
+    if (np > 0.4) {
+        for (var i = 0; i < 3; i++) {
+            let fi = f32(i);
+            let sd2 = floor(t * 5.0) + fi * 9.0;
+            let bx = hash11(sd2) * W + sin(v.y * 0.3 + fi * 3.0) * 6.0 + sin(v.y * 0.9) * 2.0;
+            if (abs(v.x - bx) < 0.8 && v.y < 120.0 && hash11(sd2 + 4.0) > 0.35 && fract(t * 5.0) < 0.45 + G.kick * 0.3) { col = vec3f(2.0, 1.9, 2.2); }
+        }
+    }
+    // ---- chorus only: rainbow confetti drifting up ----
+    if (nc > 0.03) {
+        for (var i = 0; i < 22; i++) {
+            let fi = f32(i);
+            let cp2 = floor(vec2f(hash11(fi * 6.1) * W + sin(t * 0.8 + fi) * 4.0, RH_VH - fract(t * (0.06 + 0.05 * hash11(fi * 2.7)) + hash11(fi * 8.3)) * RH_VH));
+            let dq2 = abs(v - cp2 - 0.5);
+            if (dq2.x < 1.2 && dq2.y < 1.2 && bayer < nc) { col = hsv(hash11(fi * 1.9) + t * 0.05, 0.55, 1.6); }
+        }
+    }
+
     // ---- bubbles: ambient (faster with flux), regulator, click burst ----
-    for (var i = 0; i < 14; i++) {
+    for (var i = 0; i < 28; i++) {
+        if (i >= 14 && bayer >= nd) { break; }
         let fi = f32(i);
         let bp = vec2f(hash11(fi * 3.7) * W + sin(t * 1.5 + fi) * 2.0,
                        RH_VH - fract(t * (0.05 + hash11(fi * 5.1) * 0.06) + G.travel * 0.01 + hash11(fi * 9.3)) * 175.0);
@@ -547,20 +613,25 @@ fn look(fc: vec2f) -> vec4f {
     let score = bc * 100.0 + floor(G.travel) * 10.0;
     let combo = f32(1 + i32(bc) % 32);
     let hud_c = vec3f(1.3);
+    let hud_on = bayer < clamp(1.0 - nq - nd, 0.0, 1.0) * 1.001;
     let sq = pix - vec2f(4.0, 3.0);
     let s_sh = rh_word(sq - 1.0, 10, 11, 12, 13, 14) + rh_num(sq - vec2f(23.0, 1.0), score, 7);
     let s_on = rh_word(sq, 10, 11, 12, 13, 14) + rh_num(sq - vec2f(22.0, 0.0), score, 7);
-    if (s_sh > 0.5) { col = RH_INK; }
-    if (s_on > 0.5) { col = select(hud_c, G.pal1.rgb * 1.4, sq.x >= 22.0); }
+    if (s_sh > 0.5 && hud_on) { col = RH_INK; }
+    if (s_on > 0.5 && hud_on) { col = select(hud_c, G.pal1.rgb * 1.4, sq.x >= 22.0); }
     let cq2 = pix - vec2f(W - 40.0, 3.0);
     let c_sh = rh_word(cq2 - 1.0, 11, 12, 15, 16, 12) + rh_word(cq2 - vec2f(23.0, 1.0), 17, -1, -1, -1, -1) + rh_num(cq2 - vec2f(27.0, 1.0), combo, 2);
     let c_on = rh_word(cq2, 11, 12, 15, 16, 12) + rh_word(cq2 - vec2f(22.0, 0.0), 17, -1, -1, -1, -1) + rh_num(cq2 - vec2f(26.0, 0.0), combo, 2);
-    if (c_sh > 0.5) { col = RH_INK; }
-    if (c_on > 0.5) { col = select(hud_c, mix(G.pal2.rgb * 1.4, G.pal1.rgb * 1.8, G.kick), cq2.x >= 22.0); }
-    if (G.drop > 0.03) {
+    if (c_sh > 0.5 && hud_on) { col = RH_INK; }
+    if (c_on > 0.5 && hud_on) { col = select(hud_c, mix(G.pal2.rgb * 1.4, G.pal1.rgb * 1.8, G.kick), cq2.x >= 22.0); }
+    if (bpg > 0.3 && fract(t * (1.0 + 4.0 * bpg)) < 0.5) {
+        let wq2 = pix - vec2f(floor(W * 0.5) - 8.0, 13.0);
+        if (rh_word(wq2, 16, 12, 10, 10, -1) > 0.5) { col = vec3f(1.8, 0.3, 0.2); }
+    }
+    if (bossOn) {
         let bq2 = pix - vec2f(floor(W * 0.5) - 34.0, 13.0);
         if (rh_word(bq2, 16, 12, 10, 10, -1) > 0.5) { col = select(vec3f(1.8, 0.3, 0.2), vec3f(1.8), fract(t * 6.0) < 0.5); }
-        let hp = smoothstep(0.05, 0.9, G.drop);
+        let hp = max(smoothstep(0.05, 0.9, G.drop), np * max(0.12, 0.95 - G.section_age * 0.02));
         let hx = bq2.x - 18.0;
         if (hx >= 0.0 && hx < 50.0 && bq2.y >= 0.0 && bq2.y < 5.0) {
             let edge = hx < 1.0 || hx >= 49.0 || bq2.y < 1.0 || bq2.y >= 4.0;
@@ -570,6 +641,8 @@ fn look(fc: vec2f) -> vec4f {
 
     // ---- drop flash, vignette, palette quantisation with ordered dither ----
     col += G.pal1.rgb * G.drop * 0.12;
+    col += vec3f(0.35, 0.04, 0.05) * G.snare * nb;
+    col = mix(col, col * vec3f(1.2, 0.45, 0.5), bpg * clamp(dot(fc / G.res - 0.5, fc / G.res - 0.5) * 3.5, 0.0, 1.0));
     let uv = fc / G.res;
     col *= 1.0 - 0.3 * dot(uv - 0.5, uv - 0.5) * 2.0;
     let L = 7.0;

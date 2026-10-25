@@ -79,13 +79,29 @@ fn look(fc0: vec2f) -> vec4f {
     let uv = fc0 / res;
     let p = centered(fc);
 
+    // song-section weights (cross-fading), build-up tension 0..1 over ~12 s
+    let nq = sec(SEC_QUIET); let nv = sec(SEC_VERSE); let nb = sec(SEC_BUILD);
+    let nc = sec(SEC_CHORUS); let nd = sec(SEC_BREAKDOWN); let np = sec(SEC_DROP);
+    let bpg = sec_progress(12.0) * nb;
     let mo = G.mouse - vec2f(0.5);
-    let pan = mo.x * 0.7 + sin(G.time * 0.1) * 0.05;
-    let yh = 0.04 + mo.y * 0.35;               // horizon line (mouse tilts the camera)
-    let cpink = G.pal0.rgb;
-    let cviol = G.pal1.rgb;
-    let csun = G.pal2.rgb;
+    // camera: chorus sways wide and rises, breakdown drops the horizon (huge sky), build-up shakes, drop dips + lurches
+    let shake = (hash11(floor(G.time * 25.0)) - 0.5) * (0.012 * bpg * bpg + 0.02 * G.drop);
+    let pan = mo.x * 0.7 + sin(G.time * 0.1) * 0.05 + sin(G.time * 0.31) * 0.14 * nc + shake + sin(G.time * 2.1) * 0.03 * np;
+    let yh = 0.04 + mo.y * 0.35 + 0.07 * nc - 0.16 * nd - 0.04 * nq - 0.07 * np + 0.03 * bpg;
+    // colours: drop flips pink <-> cyan, chorus warms the sky to sunset, breakdown cools it
+    var cpink = G.pal0.rgb;
+    var cviol = G.pal1.rgb;
+    var csun = G.pal2.rgb;
+    cpink = mix(cpink, NH_CYAN, 0.85 * np);
+    cviol = mix(cviol, G.pal0.rgb * 0.7, 0.55 * np);
+    cviol = mix(cviol, mix(G.pal0.rgb, G.pal2.rgb, 0.45) * 1.1, 0.5 * nc);
+    cviol = mix(cviol, vec3f(0.12, 0.55, 0.75), 0.45 * nd);
+    cpink = mix(cpink, vec3f(0.55, 0.65, 1.0), 0.35 * nd);
+    cpink = mix(cpink, csun, 0.35 * nc);
+    csun = mix(csun, vec3f(1.0, 0.95, 0.85), 0.8 * bpg);
     let speed = G.travel * 3.0;
+    let sbase = 0.36 * (0.55 * nq + nv + nb * (1.0 + 0.3 * bpg) + 1.35 * nc + 1.7 * nd + 1.1 * np);
+    let slift = 0.27 + 0.1 * nc + 0.12 * bpg - 0.12 * nq - 0.04 * nd;
 
     var col = vec3f(0.0);
     let above = p.y - yh;
@@ -102,7 +118,7 @@ fn look(fc0: vec2f) -> vec4f {
         if (sh > 0.86) {
             let so = hash22(sc) * 0.8 + 0.1;
             let tw = 0.5 + 0.5 * sin(G.time * (2.0 + 6.0 * sh) + sh * 40.0) + G.hat * step(0.95, sh) * 2.0;
-            col += vec3f(0.85, 0.85, 1.0) * smoothstep(0.08, 0.0, length(fract(sg) - so)) * tw * smoothstep(0.05, 0.4, above) * (sh - 0.86) * 8.0;
+            col += vec3f(0.85, 0.85, 1.0) * smoothstep(0.08, 0.0, length(fract(sg) - so)) * tw * smoothstep(0.05, 0.4, above) * (sh - 0.86) * 8.0 * (1.0 + 0.9 * nq + 0.7 * nd);
         }
         // shooting stars: one per beat (two when busy)
         for (var k = 0; k < 2; k++) {
@@ -117,19 +133,56 @@ fn look(fc0: vec2f) -> vec4f {
             let along = clamp(dot(p - tail, dir) / length(head - tail), 0.0, 1.0);
             col += mix(cpink, vec3f(1.0), along) * nh_ln(d, pxs * 1.5) * along * (1.0 - st) * 1.5 * step(0.05, G.energy);
         }
+        col += mix(cpink, csun, 0.5) * nc * 0.55 * exp(-above * 3.0);          // chorus: sunset sky
+        // breakdown / quiet: aurora ribbons driven by the melody
+        let aur = nd + 0.25 * nq;
+        if (aur > 0.01) {
+            for (var i = 0; i < 3; i++) {
+                let fi = f32(i);
+                let cy = yh + 0.4 + 0.17 * fi + 0.09 * sin(p.x * (1.6 + fi * 0.5) + G.time * (0.25 + 0.1 * fi) + fi * 2.0) + 0.1 * spec(0.2 + fi * 0.2);
+                let w = 0.05 + 0.05 * G.mid;
+                let rb = exp(-abs(p.y - cy) / w) * (0.35 + 1.4 * spec(0.15 + fi * 0.22 + 0.05 * sin(p.x * 3.0)));
+                col += palc(fi * 0.33 + p.x * 0.15 + G.time * 0.02) * rb * aur * 0.45 * smoothstep(0.0, 0.2, above);
+            }
+        }
         // ---------------- striped sun ----------------
-        let sc0 = vec2f(-pan * 0.35, yh + 0.27);
-        let sr = 0.36 * (1.0 + 0.03 * G.bass + 0.04 * G.drop);
+        let sc0 = vec2f(-pan * 0.35, yh + slift);
+        let sr = sbase * (1.0 + 0.03 * G.bass + 0.04 * G.drop);
         let sq = p - sc0;
         let sd = length(sq) - sr;
         let sy = sq.y / sr;                               // -1 bottom .. 1 top
         // stripes in the lower half scroll down on the beat, gaps widen downward
-        let stripe = fract(sy * 7.0 + G.beat_phase);
+        let stripe = fract(sy * 7.0 + G.beat_phase + G.time * 1.5 * bpg);
         let gap = clamp((0.35 - sy) * 0.5, 0.0, 0.75);
         let cut = smoothstep(gap - 0.04, gap, stripe) * 0.0 + step(stripe, gap) * step(sy, 0.35);
         let sunc = mix(cpink * 1.05, csun * 1.05, smoothstep(-0.8, 0.7, sy));
-        col = mix(col, sunc * (1.0 + 0.4 * G.kick), fill(sd, pxs) * (1.0 - cut));
-        col += mix(cpink, csun, 0.3) * 0.3 * exp(-max(sd, 0.0) * 6.0) * (0.4 + 0.4 * G.energy + 0.6 * G.kick + G.drop) * step(0.0, sd);
+        col = mix(col, sunc * (1.0 + 0.4 * G.kick + 0.6 * bpg), fill(sd, pxs) * (1.0 - cut * (1.0 - 0.85 * nd)));
+        col += mix(cpink, csun, 0.3) * 0.3 * exp(-max(sd, 0.0) * 6.0) * (0.4 + 0.4 * G.energy + 0.6 * G.kick + G.drop + 0.7 * nd + 0.6 * bpg) * step(0.0, sd);
+        // build-up: rings collapse into the sun, faster as tension climbs; snare flashes the sky
+        if (bpg > 0.01) {
+            let rf = fract(G.time * (0.5 + 1.8 * bpg));
+            col += csun * nh_ln(abs(length(sq) - sr - (1.0 - rf) * 1.1), pxs * 2.0) * rf * bpg * 0.9;
+            let ang = atan2(sq.y, sq.x);
+            col += csun * pow(abs(sin(ang * 14.0 + G.time * 2.0)), 24.0) * bpg * 0.35 * exp(-length(sq) * 1.4);
+            col += vec3f(1.0, 0.9, 0.95) * G.snare * 0.25 * nb * exp(-above * 2.0);
+        }
+        // chorus: soft god-rays fanning up and open from the sun
+        if (nc > 0.01) {
+            let ang = atan2(sq.y, sq.x);
+            col += mix(cpink, csun, 0.6) * smoothstep(0.55, 1.0, sin(ang * 9.0 + G.time * 0.25) * 0.5 + 0.5) * nc * 0.28 * exp(-length(sq) * 0.9);
+        }
+        // DROP ONLY: laser fan sweeping out of the sun + shockwave ring
+        if (np > 0.01) {
+            let ang = atan2(sq.y, sq.x);
+            var lz = 0.0;
+            for (var i = 0; i < 7; i++) {
+                let fi = f32(i);
+                let a = PI * 0.5 + (fi - 3.0) * 0.3 + sin(G.time * 1.6 + fi) * 0.35 * (1.0 + G.kick);
+                lz += smoothstep(0.03, 0.0, abs(ang - a)) + 0.3 * exp(-abs(ang - a) * 12.0);
+            }
+            col += mix(cpink, vec3f(1.0), 0.35) * lz * np * (0.5 + 0.8 * G.kick + 0.3 * G.bass) * exp(-length(sq) * 0.5);
+            col += cpink * nh_ln(abs(length(sq) - (1.0 - G.drop) * 3.0), pxs * 3.0) * G.drop * 1.2;
+        }
         // ---------------- skyline: windows flicker to the highs ----------------
         let bxs = (p.x + pan * 0.6) / 0.03;
         let bc = floor(bxs);
@@ -162,13 +215,13 @@ fn look(fc0: vec2f) -> vec4f {
         let dzl = abs(fract(zz * 0.5 + 0.5) - 0.5) * 2.0;
         let dxl = abs(fract(xw * 0.5 + 0.5) - 0.5) * 2.0;
         let fog = exp(-z * 0.035);
-        let gpulse = 1.0 + 0.8 * G.snare + 1.5 * G.drop;
+        let gpulse = (1.0 + 0.8 * G.snare + 1.5 * G.drop + 1.2 * bpg + 0.6 * np) * (1.0 - 0.55 * nq - 0.45 * nd);
         var grid = nh_ln(dzl, fz * 1.3) * clamp(1.0 - fz * 1.5, 0.0, 1.0) + nh_ln(dxl, fx * 1.3);
         col = vec3f(0.015, 0.0, 0.03) + cviol * 0.05 * fog;
         // sun reflection: rippled mirror image
         let ry = yh + dy * 1.0;
-        let rq = vec2f(p.x + pan * 0.35 + sin(z * 3.0 + G.time * 2.0) * 0.012 * dy * 4.0, ry - (yh + 0.27));
-        let rsd = length(rq) - 0.36;
+        let rq = vec2f(p.x + pan * 0.35 + sin(z * 3.0 + G.time * 2.0) * 0.012 * dy * 4.0, ry - (yh + slift));
+        let rsd = length(rq) - sbase;
         let rstripe = step(0.5, fract(z * 1.5 + speed * 0.5));
         col += mix(cpink, csun, 0.5) * fill(rsd, pxs * 4.0) * 0.35 * smoothstep(0.35, 0.0, dy) * rstripe;
         // road: dark asphalt, glowing edges, dashed centre line
@@ -200,7 +253,8 @@ fn look(fc0: vec2f) -> vec4f {
         let age = clamp(zk / 45.0, 0.0, 1.0);
         let bx = clamp(a / 40.0, 0.0, 1.0) * 0.8 + 0.03;
         let hs = hist(bx, age);
-        let h = env * (0.8 + 2.2 * noise2(vec2f(xw * 0.12, f32(k) * 7.3)) + 7.0 * hs * hs + 1.2 * hs);
+        let mh = 0.3 * nq + nv + nb * (1.0 + 0.35 * bpg) + 1.3 * nc + 0.4 * nd + 1.6 * np;
+        let h = mh * env * (0.8 + 2.2 * noise2(vec2f(xw * 0.12, f32(k) * 7.3)) + 7.0 * hs * hs + 1.2 * hs);
         let ybase = yh - NH_CAMH / zk;
         let ytop = yh + (h - NH_CAMH) / zk;
         let fade = smoothstep(45.0, 30.0, zk) * smoothstep(3.0, 6.0, zk);
@@ -230,7 +284,7 @@ fn look(fc0: vec2f) -> vec4f {
     col += cpink * nh_ln(abs(pd), pxs * 1.2) * 0.35 * (0.6 + 0.6 * G.energy);
 
     // ---------------- the car (rear view), tail lights flare on the kick ----------------
-    let bounce = 0.008 * (1.0 - G.beat_phase) * G.energy + 0.004 * sin(G.time * 9.0) * G.bass;
+    let bounce = 0.008 * (1.0 - G.beat_phase) * G.energy * (1.0 - nd) + 0.004 * sin(G.time * 9.0) * G.bass;
     let cq = p - vec2f(-pan * 0.15, -0.72 + bounce);
     let body = sd_round_box(cq, vec2f(0.32, 0.07), 0.03);
     let cab = sd_round_box(cq - vec2f(0.0, 0.11), vec2f(0.2 - (cq.y - 0.11) * 0.8, 0.05), 0.02);
@@ -245,7 +299,7 @@ fn look(fc0: vec2f) -> vec4f {
     // licence plate + bumper line + spoiler
     col += vec3f(0.6, 0.7, 0.9) * nh_ln(abs(sd_box(cq - vec2f(0.0, -0.035), vec2f(0.05, 0.016))), pxs) * 0.5;
     col += NH_CYAN * nh_ln(abs(sd_box(cq - vec2f(0.0, 0.085), vec2f(0.34, 0.006))), pxs) * 0.6;
-    let tli = 0.8 + 1.6 * G.kick + 0.8 * G.drop;
+    let tli = (0.8 + 1.6 * G.kick + 0.8 * G.drop) * (1.0 - 0.7 * nq - 0.55 * nd) + 0.9 * bpg;
     col += vec3f(1.0, 0.12, 0.25) * (fill(tl, pxs) * tli + exp(-max(tl, 0.0) / 0.03) * 0.35 * tli);
     // light trails reflected on the road
     let tr = abs(cq.x) - 0.2;
@@ -256,6 +310,20 @@ fn look(fc0: vec2f) -> vec4f {
         let wv = wave(wx) * 0.05;
         col += cpink * nh_ln(abs(cq.y + 0.2 - wv), pxs * 1.2) * 0.6 * smoothstep(0.4, 0.1, abs(cq.x));
     }
+
+    // ---------------- floating lights: breakdown drifts, chorus sparkles (melody keys drive size) ----------------
+    let nfl = 10 + i32(G.quality) * 6;
+    for (var i = 0; i < 16; i++) {
+        if (i >= nfl) { break; }
+        let fi = f32(i);
+        let fp = vec2f((hash11(fi * 3.1) - 0.5) * 3.2 + sin(G.time * 0.3 + fi) * 0.1,
+                       -1.0 + fract(hash11(fi * 5.7) + G.time * (0.02 + 0.03 * hash11(fi))) * 2.4);
+        let kv = key(36 + (i * 3) % 40);
+        let fa = nd + 0.5 * nc + 0.3 * nq;
+        col += mix(cpink, vec3f(1.0), 0.4) * fa * (0.5 + 2.5 * kv + 0.5 * G.mid) * 0.0025 / (dot(p - fp, p - fp) + 0.0006);
+    }
+    col += cpink * np * G.kick * 0.18;
+    col *= 1.0 - 0.4 * nq;
 
     // ---------------- VHS overlay ----------------
     // tape counter + PLAY triangle

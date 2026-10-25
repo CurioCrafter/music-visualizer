@@ -734,6 +734,7 @@ impl App {
                     self.auto.flip += 1;
                     self.auto.since_track = 0.0;
                     self.auto.fresh = true;
+                    self.an.new_song();
                 }
             }
             new_art = np.art.clone();

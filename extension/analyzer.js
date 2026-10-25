@@ -1,6 +1,9 @@
 // Port of src/analyzer.rs + src/state.rs. FFTs come from Web Audio AnalyserNodes (getFloatFrequencyData, dB),
 // so the maths below starts from dB instead of a raw FFT, but the signals and ranges are the same.
 export const BANDS = 96, N = 2048, NN = 8192, HIST = 64;
+// song sections, same numbers as SEC_* in shaders/common.wgsl
+export const QUIET = 0, VERSE = 1, BUILD = 2, CHORUS = 3, BREAKDOWN = 4, DROP = 5;
+const PEAK_FLOOR = 0.2; // the loudest stretch of a song is assumed to be at least this RMS (see analyzer.rs)
 const freqOf = (b) => 25 * Math.pow(640, b / (BANDS - 1));
 const bandAt = (hz) => Math.trunc(Math.max(0, Math.min(BANDS - 1, Math.log(hz / 25) / Math.log(640) * (BANDS - 1))));
 const avg = (v, a, b) => { let s = 0; for (let i = a; i <= b; i++) s += v[i]; return s / (b - a + 1); };
@@ -36,6 +39,10 @@ export class Analyzer {
     this.peak = 0.5; this.bassAvg = 0; this.bassFast = 0;
     this.lastBeat = -10; this.lastBigBass = -10; this.lastDrop = -100; this.intervals = []; this.phaseOrigin = 0;
     this.volLong = 0; this.volPeak = 0.05;
+    this.section = QUIET; this.sectionPrev = QUIET; this.sectionAge = 0; this.cand = QUIET; this.candAge = 0;
+    this.kickRate = 0; this.snareRate = 0; this.bassLong = 0; this.bassPeak = 0.15;
+    this.eFast = 0; this.eSlow = 0; this.hiFast = 0; this.hiSlow = 0; this.lastLoud = -100;
+    this.songPeak = PEAK_FLOOR; this.songT = 0; this.silentT = 0;
     this.setup(48000);
   }
   /** Connects the analysers to an audio node (the analysers have no output, they only listen). */
@@ -115,7 +122,7 @@ export class Analyzer {
     const se = avg(this.raw, bandAt(1500), bandAt(5000)) * 0.6 + avg(this.raw, bandAt(180), bandAt(320)) * 0.4;
     const he = avg(this.raw, bandAt(7000), BANDS - 1);
     const kickHit = this.kickO.update(ke, now, 0.12, 0.04, 8, dt);
-    this.snareO.update(se, now, 0.12, 0.03, 7, dt);
+    const snareHit = this.snareO.update(se, now, 0.06, 0.03, 7, dt);
     this.hatO.update(he, now, 0.06, 0.02, 16, dt);
 
     // beat = kick onset, or a bass jump above its running average
@@ -142,6 +149,7 @@ export class Analyzer {
     this.drop = this.bassFast > 0.55 && now - this.lastBigBass > 1.8 && now - this.lastDrop > 8 && this.vol > 0.01;
     if (this.drop) this.lastDrop = now;
     if (this.bassFast > 0.4) this.lastBigBass = now;
+    this.sections(kickHit && ke > 0.35, snareHit, now, dt); // a real kick has real low end, not a piano attack
 
     // history rows at 20 Hz
     this.histTimer += dt;
@@ -153,6 +161,50 @@ export class Analyzer {
 
     if (this.wantNotes && this.ak) this.notes(dt);
     else for (let k = 0; k < 88; k++) this.keys[k] = Math.max(this.keys[k] - dt * 1.6, 0);
+  }
+
+  /** A new track started (or 3 s of silence): forget the old song's loudness. */
+  newSong() { this.songPeak = PEAK_FLOOR; this.songT = 0; this.lastLoud = -100; }
+
+  /** Which part of the song this is: a port of Analyzer::sections in analyzer.rs (keep them the same). */
+  sections(kickHit, snareHit, now, dt) {
+    const k = (tau) => 1 - Math.exp(-dt / tau);
+    this.kickRate += ((kickHit ? 1 / dt : 0) - this.kickRate) * k(2);
+    this.snareRate += ((snareHit ? 1 / dt : 0) - this.snareRate) * k(1.5);
+    this.bassLong += (this.bass - this.bassLong) * k(2);
+    this.bassPeak = Math.max(this.bassLong, this.bassPeak * (1 - dt * 0.01), 0.15);
+    this.eFast += (this.vol - this.eFast) * k(1); this.eSlow += (this.vol - this.eSlow) * k(6);
+    this.hiFast += (this.high - this.hiFast) * k(1); this.hiSlow += (this.high - this.hiSlow) * k(6);
+
+    const perBeat = 60 / Math.max(this.bpm, 60);
+    const kr = Math.min(this.kickRate * perBeat, 1.5), sr = Math.min(this.snareRate * perBeat, 4);
+    const bs = Math.min(this.bassLong / this.bassPeak, 1);
+    this.songPeak = Math.max(this.volLong, this.songPeak * (1 - dt * 0.002), PEAK_FLOOR);
+    const level = this.volLong / this.songPeak;
+    const rise = (this.eFast - this.eSlow) / this.songPeak + (this.hiFast - this.hiSlow) * 2;
+    if (level > 0.85) this.lastLoud = now;
+    const afterBig = now - this.lastLoud < 40;
+    this.songT += dt;
+    this.silentT = this.vol < 0.003 ? this.silentT + dt : 0;
+    if (this.silentT > 3) this.newSong();
+
+    let want;
+    if (this.section === DROP && now - this.lastDrop < 60 && level > 0.8) want = DROP;
+    else if (level < 0.3) want = QUIET;
+    else if ((rise > 0.25 && level < 0.9 || sr > 2.5) && bs < 0.75) want = BUILD;
+    else if (afterBig && level < 0.7 && (bs < 0.5 || kr < 0.3)) want = BREAKDOWN;
+    else if (kr < 0.3 && bs < 0.4 && !afterBig) want = QUIET;
+    else if (level > 0.85 && this.songT > 30) want = CHORUS;
+    else want = VERSE;
+
+    if (want === this.cand) this.candAge += dt; else { this.cand = want; this.candAge = 0; }
+    this.sectionAge += dt;
+    const jump = rise > 0.35 && level > 0.75;
+    const slam = (this.drop || jump) && (this.section === BUILD || this.section === BREAKDOWN) && this.sectionAge > 1 && this.songT > 20;
+    if (slam) this.lastDrop = now;
+    const hold = want === BUILD ? 1 : 2, minLen = this.section === QUIET ? 2 : 6;
+    const next = slam ? DROP : this.cand !== this.section && this.candAge > hold && this.sectionAge > minLen ? this.cand : this.section;
+    if (next !== this.section) { this.sectionPrev = this.section; this.section = next; this.sectionAge = 0; }
   }
 
   notes(dt) {

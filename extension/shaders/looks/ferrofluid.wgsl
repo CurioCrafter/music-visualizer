@@ -43,6 +43,15 @@ fn ff_env(rv: vec3f) -> vec3f {
     c += pal(1.0) * 2.2 * smoothstep(0.4, 0.85, rv.x) * smoothstep(-0.6, 0.2, rv.y) * (0.45 + 1.2 * G.hat + 0.6 * G.mid + G.drop);
     c += pal(0.5) * 0.12 * smoothstep(0.1, 0.8, -rv.y);
     c += vec3f(0.25) * exp(-abs(rv.y + 0.05) * 14.0) * (0.3 + 0.7 * G.energy);
+    // section grading: quiet dim, build heats to red, drop flips colours, chorus warm gold, breakdown pale and airy
+    let wQ = sec(SEC_QUIET); let wB = sec(SEC_BUILD); let wC = sec(SEC_CHORUS); let wR = sec(SEC_BREAKDOWN); let wD = sec(SEC_DROP);
+    c *= 1.0 - 0.5 * wQ;
+    c *= mix(vec3f(1.0), vec3f(2.2, 0.55, 0.3), wB * (0.7 + 0.3 * sec_progress(12.0)));
+    c += vec3f(0.5, 0.1, 0.02) * wB * (0.7 + 0.3 * sec_progress(12.0)) * smoothstep(-0.5, 0.8, rv.y);
+    c *= mix(vec3f(1.0), vec3f(1.5, 1.15, 0.7), wC);
+    c += vec3f(0.35, 0.22, 0.06) * wC * smoothstep(-0.6, 0.6, rv.y);
+    c = mix(c, c.bgr, 0.6 * wD);
+    c = c * (1.0 - 0.25 * wR) + pal(1.0) * 0.07 * wR * smoothstep(0.0, 0.8, rv.y + 0.4);
     return c;
 }
 
@@ -76,15 +85,19 @@ fn ff_blob(p: vec2f, M: vec2f, R: f32, amp: f32, mdir: vec2f, mpull: f32, px: f3
 // chrome droplets orbiting the magnet. front = 1 draws the half in front of the blob
 fn ff_drops(p: vec2f, M: vec2f, front: bool, px: f32, fling: f32) -> vec4f {
     var acc = vec4f(0.0);
-    let cnt = 8 + i32(G.quality * 4.0);
+    let wQ = sec(SEC_QUIET); let wC = sec(SEC_CHORUS); let wR = sec(SEC_BREAKDOWN);
+    let tens = sec(SEC_BUILD) * (0.7 + 0.3 * sec_progress(12.0));
+    let cnt = 8 + i32(G.quality * 4.0) + i32(5.0 * wC + 8.0 * wR);
+    let spd = 1.0 + 2.2 * tens - 0.5 * wR - 0.6 * wQ;
     for (var i = 0; i < cnt; i++) {
         let fi = f32(i);
+        if (wQ > 0.5 && i > 2) { continue; }
         let h = hash11(fi * 3.7 + 1.0);
-        let ph = G.time * (0.35 + 0.35 * h) * select(1.0, -1.0, i % 3 == 0) + fi * 2.39 + G.travel * 0.05;
+        let ph = G.time * spd * (0.35 + 0.35 * h) * select(1.0, -1.0, i % 3 == 0) + fi * 2.39 + G.travel * 0.05;
         let depth = sin(ph);
         if ((depth < 0.0) != front) { continue; }
-        let rho = 0.48 + 0.3 * h + fling * (0.5 + h);
-        let c = M + vec2f(cos(ph) * rho * G.aspect * 0.55, 0.12 + 0.18 * hash11(fi + 9.0) + depth * rho * 0.18 + 0.05 * sin(G.time * 1.3 + fi));
+        let rho = (0.48 + 0.3 * h) * (1.0 - 0.45 * tens + 0.25 * wC + 0.45 * wR) + fling * (0.5 + h);
+        let c = M + vec2f(cos(ph) * rho * G.aspect * 0.55, 0.12 + 0.18 * hash11(fi + 9.0) + 0.35 * wR * (h + 0.3 * sin(G.time * 0.5 + fi)) + depth * rho * 0.18 + 0.05 * sin(G.time * 1.3 + fi));
         let rad = (0.01 + 0.016 * hash11(fi + 4.0)) * (1.0 - 0.3 * depth) * (1.0 + 0.4 * G.kick);
         let q = (p - c) / rad;
         let l2 = dot(q, q);
@@ -104,22 +117,30 @@ fn look(fc: vec2f) -> vec4f {
     let t = G.time;
     let asp = G.aspect;
     let pulse = pow(1.0 - G.beat_phase, 2.5);
+    let wQ = sec(SEC_QUIET); let wV = sec(SEC_VERSE); let wB = sec(SEC_BUILD);
+    let wC = sec(SEC_CHORUS); let wR = sec(SEC_BREAKDOWN); let wD = sec(SEC_DROP);
+    let tens = wB * (0.7 + 0.3 * sec_progress(12.0));
+    let drums = 1.0 - wR;
+    let en = clamp(G.energy * (1.0 - 0.7 * wQ - 0.4 * wR) + 0.6 * tens + 0.3 * wC + 0.15 * wD + 0.1 * wR, 0.0, 1.4);
     var p = centered(fc);
-    p = p * (1.0 - 0.025 * G.kick - 0.05 * G.drop);
+    p = p * (1.0 - 0.025 * G.kick * drums - 0.05 * G.drop - 0.1 * tens + 0.1 * wC + 0.12 * wR + 0.04 * wQ);
+    p = rot(0.025 * wD * sin(t * 0.9)) * p;
     let px = 2.0 / G.res.y;
 
     let H = 0.14;          // horizon
     let fy = -0.32;        // contact line of the blob on the floor
     let sub = band_avg(0, 5);
-    let R = 0.38 * (1.0 + 0.2 * sub + 0.04 * pulse + 0.02 * sin(t * 1.1));
+    let R = 0.38 * (1.0 + 0.2 * sub * (1.0 - 0.5 * wR) + 0.04 * pulse + 0.02 * sin(t * 1.1) - 0.14 * wQ - 0.12 * tens + 0.2 * wC + 0.06 * wR);
     let mpos = (G.mouse - 0.5) * vec2f(2.0 * asp, -2.0);
-    let M = vec2f(clamp(mpos.x * 0.18, -0.3, 0.3), fy + R * 0.5);
+    let trem = 0.012 * tens * sin(t * 47.0);
+    let lift = 0.1 * wR * (0.6 + 0.4 * sin(t * 0.6)) + 0.16 * wD * (0.5 + 0.5 * G.kick) + 0.05 * wC * sin(t * 0.9);
+    let M = vec2f(clamp(mpos.x * 0.18, -0.3, 0.3) + trem, fy + R * 0.5 + lift);
     let tom = mpos - M;
     let mdir = tom / max(length(tom), 1e-3);
     let clickp = (G.click_pos - 0.5) * vec2f(2.0 * asp, -2.0);
     let clickb = exp(-G.click_age * 3.0);
     let mpull = G.mouse_on * 0.7 + clickb * 1.5;
-    let amp = 0.7 + 0.5 * G.energy + 1.3 * G.kick + 0.4 * pulse * G.energy + 1.4 * G.drop;
+    let amp = (0.7 + 0.5 * en + 1.3 * G.kick * drums + 0.4 * pulse * en + 1.4 * G.drop) * (1.0 - 0.55 * wQ - 0.45 * wR) + 1.6 * tens + 0.9 * wC + 0.5 * wD + 0.5 * wR * G.mid;
     let lp = select(vec2f(-0.6, 0.9), mpos, G.mouse_on > 0.5);
     let fling = G.drop * 1.3 + G.kick * 0.06;
 
@@ -131,13 +152,41 @@ fn look(fc: vec2f) -> vec4f {
     // light panels at the sides
     let lpan = sd_round_box(vec2f(abs(p.x) - asp * 0.9, p.y - 0.35), vec2f(0.05, 0.45), 0.02);
     let pcol = select(pal(1.0) * (0.8 + 1.2 * G.hat), pal(0.0) * (0.8 + 1.8 * G.snare), p.x < 0.0);
-    col += pcol * (fill(lpan, px) * 1.2 + glow(lpan, 0.05) * 0.3) * (0.6 + 0.6 * G.energy);
+    col += pcol * (fill(lpan, px) * 1.2 + glow(lpan, 0.05) * 0.3) * (0.6 + 0.6 * en);
     // top softbox
     let sb = sd_round_box(p - vec2f(0.0, 0.92), vec2f(0.7, 0.04), 0.02);
-    col += vec3f(1.2, 1.15, 1.1) * (fill(sb, px) + glow(sb, 0.04) * 0.25) * (0.5 + 0.5 * G.energy + G.drop);
+    col += vec3f(1.2, 1.15, 1.1) * (fill(sb, px) + glow(sb, 0.04) * 0.25) * (0.5 + 0.5 * en + G.drop);
+    // chorus: god rays fan down from the softbox, warm and open
+    {
+        let ra = atan2(p.x, 0.92 - p.y);
+        let rays = pow(abs(sin(ra * 16.0 + sin(t * 0.3))), 6.0) * smoothstep(0.92, -0.3, p.y);
+        col += vec3f(1.2, 0.8, 0.35) * rays * 0.45 * wC * (0.5 + haze);
+        col += vec3f(1.0, 0.65, 0.25) * 0.22 * wC * exp(-length(p - vec2f(0.0, 0.3)) * 0.9);
+    }
+    // drop only: sunburst rays behind the blob
+    {
+        let ra = atan2(p.y - M.y, p.x - M.x);
+        let rays = pow(abs(sin(ra * 11.0 + t * 0.9)), 12.0) + 0.5 * pow(abs(sin(ra * 29.0 - t * 1.7)), 30.0);
+        col += mix(pal(0.5), vec3f(1.0), 0.4) * rays * exp(-length(p - M) * 0.8) * wD * (0.3 + 1.2 * G.kick);
+    }
+    // breakdown: soft aurora drifting over the studio
+    col += mix(pal(0.0), pal(1.0), uv.x) * 0.2 * wR * fbm2(vec2f(p.x * 1.2, p.y * 2.2) + vec2f(t * 0.05, -t * 0.03), 3) * smoothstep(-0.1, 0.8, p.y) * (0.6 + G.mid);
+    // build: heat glow around the magnet
+    col += vec3f(1.0, 0.22, 0.05) * tens * 1.0 * exp(-length(p - M) * 1.0) * (0.6 + 0.8 * G.snare);
+    col += vec3f(0.7, 0.1, 0.0) * tens * smoothstep(-0.2, 0.9, p.y);
+    // build: charge ring around the magnet fills clockwise with the build-up progress
+    {
+        let cq2 = p - M;
+        let rd2 = abs(length(cq2) - R * 1.9);
+        let a01 = fract((atan2(cq2.x, cq2.y)) / TAU);
+        let prog = wB * (0.3 + 0.7 * sec_progress(12.0));
+        let arc = step(a01, prog);
+        col += vec3f(1.8, 0.6, 0.15) * (smoothstep(0.012, 0.0, rd2) * 1.6 + glow(rd2, 0.02) * 0.4) * arc * wB;
+        col += vec3f(0.5, 0.15, 0.05) * smoothstep(0.004, 0.0, rd2) * wB;
+    }
     // dust motes in the light
     let dm = hash21(floor((p + vec2f(0.0, t * 0.02)) * 90.0));
-    col += vec3f(0.6) * step(0.996, dm) * (0.3 + G.high) * smoothstep(-0.3, 0.6, p.y);
+    col += vec3f(0.6) * step(0.996 - 0.004 * wR, dm) * (0.3 + G.high + 0.8 * wR * G.mid) * smoothstep(-0.3, 0.6, p.y);
 
     // ---------- floor: mirror + iron filings ----------
     if (p.y < H) {
@@ -171,14 +220,14 @@ fn look(fc: vec2f) -> vec4f {
         let cc = (cid + 0.25 + 0.5 * jit) * cs;
         let rel = cc - fm;
         let dist = length(rel);
-        let ang = atan2(rel.y, rel.x) + 0.6 * G.mid * sin(t * 0.7) / (1.0 + dist) + (jit.x - 0.5) * (0.25 + 2.5 * G.kick / (1.0 + dist * 2.0));
+        let ang = atan2(rel.y, rel.x) + 0.6 * G.mid * sin(t * 0.7) / (1.0 + dist) + (jit.x - 0.5) * (0.25 + 2.5 * G.kick * drums / (1.0 + dist * 2.0)) * (1.0 - 0.6 * tens);
         let lq = rot(-ang) * (fp - cc);
-        let len = cs * (0.25 + 0.35 / (1.0 + dist * 1.5)) * (1.0 + 0.6 * G.kick);
+        let len = cs * (0.25 + 0.35 / (1.0 + dist * 1.5)) * (1.0 + 0.6 * G.kick + 0.6 * tens + 0.3 * wC);
         let fd = sd_box(lq, vec2f(len, cs * 0.05));
         let fpx = px * 0.6 / (dy * dy);
         let fcov = fill(fd, fpx) * smoothstep(9.0, 3.0, Z) * step(0.25, jit.y);
         let glint = pow(abs(sin(ang * 2.0 + p.x * 3.0 + t * 0.3)), 8.0);
-        fl = mix(fl, vec3f(0.05, 0.05, 0.06) + mix(pal(0.0), pal(1.0), step(0.0, rel.x)) * glint * 0.7 * (0.4 + G.energy), fcov * 0.85);
+        fl = mix(fl, vec3f(0.05, 0.05, 0.06) + mix(pal(0.0), pal(1.0), step(0.0, rel.x)) * glint * 0.7 * (0.4 + en), fcov * 0.85);
         // horizon sheen
         fl += vec3f(0.12, 0.12, 0.15) * exp(-dy * 25.0);
         col = fl;
@@ -194,9 +243,9 @@ fn look(fc: vec2f) -> vec4f {
     let lid = floor(lv + 0.5);
     let line = smoothstep(fw * 1.8, fw * 0.3, abs(fract(lv + 0.5) - 0.5));
     let th = atan2(fq.x, fq.y);
-    let dash = step(0.45, fract(th * 16.0 * sign(fq.x) - t * (0.3 + 1.5 * G.mid) - lid * 0.37));
+    let dash = step(0.45, fract(th * 16.0 * sign(fq.x) - t * (0.3 + 1.5 * G.mid + 3.0 * tens) - lid * 0.37));
     let fvis = line * dash * smoothstep(0.25, 0.45, rr) * exp(-rr * 0.9) * step(fy, p.y) * step(lid, 3.5) * step(-0.5, lid);
-    col += palc(lid * 0.3 + 0.1) * fvis * (0.25 + 0.9 * G.energy + 0.8 * pulse * G.energy);
+    col += palc(lid * 0.3 + 0.1) * fvis * (1.0 - 0.85 * wQ) * (1.0 + 0.8 * wC + 1.2 * tens) * (0.25 + 0.9 * en + 0.8 * pulse * en);
 
     // ---------- drops behind, blob, drops in front ----------
     if (p.y > fy - px) {
@@ -208,14 +257,16 @@ fn look(fc: vec2f) -> vec4f {
         let df = ff_drops(p, M, true, px, fling);
         col = mix(col, df.rgb, df.a);
     }
-    col += pal(0.5) * 0.25 * exp(-abs(p.y - fy) * 60.0) * exp(-abs(p.x - M.x) * 2.5) * (0.3 + G.bass);
+    col += pal(0.5) * 0.25 * exp(-abs(p.y - fy) * 60.0) * exp(-abs(p.x - M.x) * 2.5) * (0.3 + G.bass) * (1.0 - 0.8 * wD - 0.4 * wR);
 
     // ---------- drop: flash ----------
     col += vec3f(1.0, 0.97, 1.0) * pow(G.drop, 4.0) * 0.8;
     col += pal(0.5) * exp(-abs(length(p - M) - (1.0 - G.drop) * 2.4) * 12.0) * G.drop * 1.2;
 
-    // light trails for the droplets
-    col = max(col, prev(uv) * 0.55);
+    col += vec3f(1.0, 0.8, 0.7) * G.snare * wB * (0.15 + 0.4 * tens);
+    col *= 1.0 - 0.3 * wQ;
+    // light trails for the droplets (long and dreamy in the breakdown)
+    col = max(col, prev(uv) * (0.55 + 0.3 * wR + 0.08 * wC));
 
     col *= 1.0 - 0.4 * pow(length(uv - 0.5) * 1.3, 2.5);
     col += (hash21(fc + fract(t) * 37.0) - 0.5) * 0.01;

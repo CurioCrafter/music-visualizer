@@ -21,6 +21,7 @@ fn main() {
     match args.first().map(|s| s.as_str()) {
         Some("--shots") => return { attach_console(); shots::run(&args[1..]) },
         Some("--stills") => return { attach_console(); shots::stills(&args[1..]) },
+        Some("--sections") => return { attach_console(); shots::sections(&args[1..]) },
         Some("--reel") => return { attach_console(); shots::reel(&args[1..]) },
         _ => {}
     }

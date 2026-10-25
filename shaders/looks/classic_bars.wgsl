@@ -7,6 +7,69 @@
 const CB_N: f32 = 32.0;     // bars
 const CB_S: f32 = 24.0;     // LED segments per bar
 
+// section weights (sum to 1); bp = build-up progress 0..1 over ~12 s
+struct CbS { q: f32, v: f32, b: f32, c: f32, k: f32, d: f32, bp: f32 }
+fn cb_secs() -> CbS {
+    var s: CbS;
+    s.q = sec(SEC_QUIET); s.v = sec(SEC_VERSE); s.b = sec(SEC_BUILD);
+    s.c = sec(SEC_CHORUS); s.k = sec(SEC_BREAKDOWN); s.d = sec(SEC_DROP);
+    s.bp = s.b * sec_progress(12.0);
+    return s;
+}
+
+// 3x5 pixel font: five rows of 3 bits (octal digits)
+fn cb_g(a: u32, b: u32, c: u32, d: u32, e: u32) -> u32 { return (a << 12u) | (b << 9u) | (c << 6u) | (d << 3u) | e; }
+fn cb_glyph(ch: i32) -> u32 {
+    switch ch {
+        case 0: { return cb_g(2u, 5u, 7u, 5u, 5u); }   // A
+        case 1: { return cb_g(6u, 5u, 6u, 5u, 6u); }   // B
+        case 2: { return cb_g(3u, 4u, 4u, 4u, 3u); }   // C
+        case 3: { return cb_g(6u, 5u, 5u, 5u, 6u); }   // D
+        case 4: { return cb_g(7u, 4u, 6u, 4u, 7u); }   // E
+        case 5: { return cb_g(5u, 5u, 7u, 5u, 5u); }   // H
+        case 6: { return cb_g(7u, 2u, 2u, 2u, 7u); }   // I
+        case 7: { return cb_g(5u, 5u, 6u, 5u, 5u); }   // K
+        case 8: { return cb_g(4u, 4u, 4u, 4u, 7u); }   // L
+        case 9: { return cb_g(5u, 7u, 7u, 7u, 5u); }   // N
+        case 10: { return cb_g(2u, 5u, 5u, 5u, 2u); }  // O
+        case 11: { return cb_g(6u, 5u, 6u, 4u, 4u); }  // P
+        case 12: { return cb_g(2u, 5u, 5u, 6u, 3u); }  // Q
+        case 13: { return cb_g(6u, 5u, 6u, 5u, 5u); }  // R
+        case 14: { return cb_g(3u, 4u, 2u, 1u, 6u); }  // S
+        case 15: { return cb_g(7u, 2u, 2u, 2u, 2u); }  // T
+        case 16: { return cb_g(5u, 5u, 5u, 5u, 7u); }  // U
+        case 17: { return cb_g(5u, 5u, 5u, 5u, 2u); }  // V
+        case 18: { return cb_g(5u, 5u, 7u, 7u, 5u); }  // W
+        case 19: { return cb_g(0u, 0u, 7u, 0u, 0u); }  // -
+        default: { return 0u; }
+    }
+}
+fn cb_name_len(s: i32) -> i32 {
+    switch s { case 0: { return 5; } case 1: { return 5; } case 2: { return 8; } case 3: { return 6; } case 4: { return 9; } default: { return 4; } }
+}
+fn cb_name_ch(s: i32, i: i32) -> i32 {
+    var a = array<i32, 9>(12, 16, 6, 4, 15, 0, 0, 0, 0);          // QUIET
+    if (s == 1) { a = array<i32, 9>(17, 4, 13, 14, 4, 0, 0, 0, 0); }                 // VERSE
+    if (s == 2) { a = array<i32, 9>(1, 16, 6, 8, 3, 19, 16, 11, 0); }                // BUILD-UP
+    if (s == 3) { a = array<i32, 9>(2, 5, 10, 13, 16, 14, 0, 0, 0); }                // CHORUS
+    if (s == 4) { a = array<i32, 9>(1, 13, 4, 0, 7, 3, 10, 18, 9); }                 // BREAKDOWN
+    if (s == 5) { a = array<i32, 9>(3, 13, 10, 11, 0, 0, 0, 0, 0); }                 // DROP
+    return a[clamp(i, 0, 8)];
+}
+// dot-matrix section name. p in font cells, origin top-left, y down. returns 0..1 lit dot
+fn cb_text(p: vec2f, s: i32) -> f32 {
+    let n = cb_name_len(s);
+    if (p.x < 0.0 || p.y < 0.0 || p.y >= 5.0 || p.x >= f32(n) * 4.0) { return 0.0; }
+    let ci = i32(floor(p.x / 4.0));
+    let gx = i32(floor(p.x - f32(ci) * 4.0));
+    let gy = i32(floor(p.y));
+    if (gx > 2) { return 0.0; }
+    let bits = cb_glyph(cb_name_ch(s, ci));
+    let on = f32((bits >> u32(14 - gy * 3 - gx)) & 1u);
+    let f = fract(p) - vec2f(0.5);
+    return on * fill(sd_round_box(f, vec2f(0.36), 0.12), 0.25);
+}
+
 fn cb_ln(d: f32, w: f32) -> f32 { return clamp(1.0 - d / w, 0.0, 1.0); }
 
 fn cb_seg7(p: vec2f, dg: i32) -> f32 {
@@ -101,6 +164,9 @@ fn cb_device(q: vec2f, px: f32, a: f32, m: vec2f) -> vec3f {
     if (box > px * 2.0) { return vec3f(-1.0); }
     let spotd = q - m;
     let spot = exp(-dot(spotd, spotd) / 0.06);
+    let S = cb_secs();
+    let sid = i32(G.section);
+    let sfade = sec(G.section);
     // brushed aluminium
     let brush = noise2(vec2f(q.x * 3.0, q.y * 700.0)) * 0.6 + hash21(vec2f(floor(q.y * 900.0), 1.0)) * 0.4;
     let aniso = exp(-spotd.x * spotd.x * 6.0 - spotd.y * spotd.y * 30.0);
@@ -144,25 +210,38 @@ fn cb_device(q: vec2f, px: f32, a: f32, m: vec2f) -> vec3f {
             let bi = floor(lx * CB_N);
             let bx = (bi + 0.5) / CB_N;
             let fb = fract(lx * CB_N);
-            let si = floor(ly * CB_S);
-            let fs = fract(ly * CB_S);
-            let v = clamp(pow(spec(bx * 0.97), 0.85) * 1.12, 0.0, 1.0);
+            let gain = 0.55 * S.q + S.v + S.b + 1.05 * S.c + 0.9 * S.k + 1.1 * S.d;
+            // display modes: drop = mirrored from the centre line, others from the bottom
+            let lyc = mix(ly, abs(ly - 0.5) * 2.0, S.d);
+            let si = floor(lyc * CB_S);
+            let fs = fract(lyc * CB_S);
+            var v = clamp(pow(spec(bx * 0.97), 0.85) * 1.12 * gain, 0.0, 1.0);
+            // build-up: a rising tide of lit segments with ragged bar heights
+            v = max(v, S.bp * (0.15 + 0.5 * S.bp) * (0.6 + 0.4 * hash21(vec2f(bi, 3.0))));
             // peak hold: highest recent level minus gravity (hold 0.35 s, then fall)
             var pk = 0.0;
             for (var j = 0; j < 14; j++) {
                 let ag = f32(j) / 13.0 * 0.6;
                 let ts = max(ag * 3.2 - 0.35, 0.0);
-                pk = max(pk, clamp(pow(hist(bx * 0.97, ag), 0.85) * 1.12, 0.0, 1.0) - 0.9 * ts * ts);
+                pk = max(pk, clamp(pow(hist(bx * 0.97, ag), 0.85) * 1.12 * gain, 0.0, 1.0) - 0.9 * ts * ts);
             }
             pk = max(pk, v);
-            let led = sd_round_box(vec2f(fb - 0.5, (fs - 0.5) * 0.45), vec2f(0.36, 0.15), 0.04);
+            // drop: peak-hold storm, the caps jump around near the top
+            pk = max(pk, (0.6 + 0.4 * hash21(vec2f(bi, floor(G.time * 14.0)))) * S.d * step(0.35, hash21(vec2f(bi + 9.0, floor(G.time * 7.0)))));
+            // chorus: fat solid segments; breakdown: slimmer dots
+            let led = sd_round_box(vec2f(fb - 0.5, (fs - 0.5) * 0.45), vec2f(0.36 + 0.1 * S.c - 0.12 * S.k, 0.15 + 0.07 * S.c - 0.05 * S.k), 0.04);
             let lm = fill(led, 0.06);
-            let lc = pal(si / (CB_S - 1.0));
-            let lit = step(si + 0.5, v * CB_S);
+            let tc = si / (CB_S - 1.0);
+            let tb = mix(tc, 0.35 + 0.65 * tc, S.bp);
+            let lc = 0.7 * S.q * pal(tc * 0.25) + S.v * pal(tc) + S.b * pal(tb)
+                + S.c * palc(bx * 0.9 + G.time * 0.05 + tc * 0.15) + S.k * pal(0.55 + 0.45 * tc) + S.d * pal(1.0 - tc);
+            let lit = step(si + 0.5, v * CB_S) * (1.0 - 0.85 * S.k);
             let pseg = floor(pk * CB_S - 0.001);
-            let ispk = step(abs(si - pseg), 0.4) * step(0.04, pk);
-            let bright = 1.25 + 0.6 * G.drop + 0.25 * G.kick * step(si, 6.0);
+            let pdist = select(abs(si - pseg), min(abs(si - pseg), abs(si - (CB_S - 1.0 - pseg))), S.d > 0.5);
+            let ispk = max(step(pdist, 0.4), 0.35 * S.k * step(pdist, 1.4)) * step(0.04, pk);
+            let bright = (1.25 + 0.6 * G.drop + 0.25 * G.kick * step(si, 6.0)) * (0.6 * S.q + S.v + (1.0 + 0.35 * S.bp) * S.b + 1.2 * S.c + 0.85 * S.k + 1.3 * S.d);
             g += lc * lm * (0.045 + lit * bright + ispk * (1.6 + G.drop));
+            g += vec3f(1.0) * lm * lit * G.snare * S.b * 0.25;
             // inner LED highlight
             g += vec3f(1.0) * lm * (lit + ispk) * 0.25 * smoothstep(0.2, 0.0, abs(fs - 0.62));
             // light spill onto the black mask
@@ -172,6 +251,7 @@ fn cb_device(q: vec2f, px: f32, a: f32, m: vec2f) -> vec3f {
         g += vec3f(0.9, 0.95, 1.0) * 0.05 * smoothstep(0.08, 0.0, abs((q.x - gc.x) * 0.35 + (q.y - gc.y) - 0.18));
         g += vec3f(0.8, 0.9, 1.0) * 0.035 * smoothstep(0.03, 0.0, abs((q.x - gc.x) * 0.35 + (q.y - gc.y) - 0.3));
         g += vec3f(0.9, 0.95, 1.0) * spot * 0.22;
+        g += pal(0.5) * 0.03 * S.c + vec3f(1.0) * 0.06 * G.drop * S.d;
         g += vec3f(1.0) * 0.5 * exp(-dot(spotd, spotd) / 0.0012);
         g *= 0.75 + 0.25 * smoothstep(0.0, -0.05, gd);
         c = g;
@@ -277,6 +357,58 @@ fn cb_device(q: vec2f, px: f32, a: f32, m: vec2f) -> vec3f {
     let kdots = abs(fract((kang + 2.3) / 4.6 * 10.0 + 0.5) - 0.5);
     c += vec3f(0.7) * step(abs(length(kp) - kr - 0.025), 0.005) * step(kdots, 0.12) * step(abs(kang), 2.35);
 
+    // ---------------- section row: lamps, name, build-up meter ----------------
+    let lx0 = vx0 + 0.04;
+    for (var i = 0; i < 6; i++) {
+        let lp = q - vec2f(lx0 + f32(i) * 0.07, -0.19);
+        var w = S.q;
+        var lcol = vec3f(0.5, 0.7, 1.0);
+        if (i == 1) { w = S.v; lcol = pal(0.0); }
+        if (i == 2) { w = S.b * (0.5 + 0.5 * step(0.5, fract(G.time * (2.0 + 6.0 * S.bp)))); lcol = pal(0.5); }
+        if (i == 3) { w = S.c; lcol = vec3f(1.0, 0.8, 0.35); }
+        if (i == 4) { w = S.k; lcol = pal(0.8); }
+        if (i == 5) { w = S.d * (0.6 + 0.4 * G.kick); lcol = pal(1.0); }
+        let ld = length(lp) - 0.016;
+        c = mix(c, lcol * (0.08 + 1.8 * w) + vec3f(1.0) * 0.4 * w * smoothstep(0.012, 0.0, length(lp - vec2f(-0.004, 0.004))), fill(ld, px));
+        c += lcol * w * 0.3 * exp(-max(ld, 0.0) / 0.025);
+        c += vec3f(0.5) * cb_ln(abs(ld - 0.004), px * 1.5) * 0.5;
+    }
+    // name in dot-matrix
+    let cell = 0.0125;
+    let tp = (q - vec2f(lx0 - 0.015, -0.255 + 2.5 * cell)) / cell * vec2f(1.0, -1.0);
+    let tcol = mix(vec3f(0.6, 0.8, 1.0), mix(pal(0.0), pal(1.0), S.d), clamp(S.v + S.b + S.c + S.k + S.d, 0.0, 1.0));
+    let tx = cb_text(tp, sid);
+    c += tcol * (tx * (0.25 + 1.4 * sfade) + 0.03 * step(abs(tp.y - 2.5), 2.5) * step(0.0, tp.x) * step(tp.x, 36.0) * (1.0 - step(0.5, tx)));
+    // build-up meter: 20 segments fill with tension
+    let bmx = (q.x - lx0 + 0.015) / 0.43;
+    if (abs(q.y + 0.33) < 0.012 && bmx > 0.0 && bmx < 1.0) {
+        let bs = floor(bmx * 20.0);
+        let on = step((bs + 0.5) / 20.0, S.bp);
+        let flash = 1.0 + 1.5 * G.snare * S.b;
+        c = mix(c, pal(bs / 19.0) * (0.06 + 1.5 * on * flash), step(0.12, fract(bmx * 20.0)) * step(fract(bmx * 20.0), 0.88));
+    }
+
+    // rack light strip along the top edge
+    if (abs(q.y - (y1 - 0.022)) < 0.007 && abs(q.x) < x1 - 0.1) {
+        let u = (q.x / (x1 - 0.1)) * 0.5 + 0.5;
+        let k = floor(u * 40.0);
+        let ph = fract(u * 40.0);
+        let hs = hash21(vec2f(k, floor(G.time * 16.0)));
+        var l = 0.0;
+        var scol = vec3f(1.0, 0.7, 0.35);
+        l += S.q * 0.12;
+        l += S.v * 0.5;
+        l += S.b * step(u, S.bp) * (0.6 + 1.5 * G.snare);
+        l += S.c * (0.8 + 0.5 * sin(u * 12.0 - G.time * 2.0));
+        l += S.k * (0.25 + 0.25 * sin(G.time * 0.8));
+        l += S.d * step(0.5, hs) * 2.0;
+        scol = mix(scol, vec3f(0.5, 0.7, 1.0), S.k + 0.4 * S.q);
+        scol = mix(scol, pal(0.5), S.b);
+        scol = mix(scol, vec3f(1.0, 0.9, 0.6), S.c);
+        scol = mix(scol, mix(pal(1.0), vec3f(1.0), 0.5 * step(0.5, fract(k * 0.5))), S.d);
+        c = mix(c, scol * l, step(0.1, ph) * step(ph, 0.9) * 0.95);
+    }
+
     // outline
     c *= fill(box, px);
     return c;
@@ -316,6 +448,43 @@ fn look(fc: vec2f) -> vec4f {
         col *= 0.5 + 0.5 * smoothstep(0.0, 0.08, sb);
     }
 
+    // room lighting behind the rack, per section
+    let S = cb_secs();
+    let rc = p - vec2f(0.0, 0.1);
+    let rr = length(rc);
+    let rang = atan2(rc.y, rc.x);
+    col *= 1.0 - 0.5 * S.q;
+    // build-up: two spotlight shafts close in from the corners, snares flash them
+    for (var i = 0; i < 2; i++) {
+        let sx = select(-1.0, 1.0, i == 1);
+        let bx = sx * a * (0.9 - 0.75 * S.bp);
+        let beam = exp(-pow((p.x - bx) * 3.0, 2.0)) * smoothstep(-0.6, 0.0, p.y);
+        col += mix(pal(0.5), pal(1.0), S.bp) * beam * S.bp * (0.1 + 0.3 * G.snare);
+    }
+    col += pal(0.5) * G.snare * S.b * 0.05 * exp(-rr);
+    // chorus: warm open sunburst of soft rays behind the rack
+    col += mix(vec3f(1.0, 0.75, 0.4), pal(0.5), 0.35) * pow(0.5 + 0.5 * sin(rang * 8.0 + G.time * 0.25), 2.0) * exp(-rr * 0.55) * S.c * (0.1 + 0.06 * G.beat);
+    col += vec3f(1.0, 0.8, 0.5) * 0.05 * S.c * exp(-rr * 0.8);
+    // breakdown: cool dark room, slow bokeh lights float up, notes make them glow
+    col = mix(col, col * vec3f(0.6, 0.7, 1.0), 0.5 * S.k);
+    if (S.k > 0.001) {
+        for (var j = 0; j < 8; j++) {
+            let fj = f32(j);
+            let h = hash11(fj * 2.3 + 1.0);
+            let bp2 = vec2f((hash11(fj * 5.1) * 2.0 - 1.0) * a * 0.95, -0.7 + fract(G.time * (0.015 + 0.01 * h) + h) * 2.0);
+            let bd = length(p - bp2);
+            col += mix(pal(0.6 + 0.4 * h), vec3f(1.0), 0.3) * smoothstep(0.09 + 0.05 * h, 0.04, bd) * (0.03 + 0.12 * key(30 + j * 4) + 0.04 * G.mid) * S.k;
+        }
+    }
+    // drop only: laser fan sweeping out from behind the rack, strobing room
+    if (S.d > 0.001) {
+        for (var j = 0; j < 5; j++) {
+            let ta = (f32(j) - 2.0) * 0.5 + sin(G.time * 1.3 + f32(j)) * 0.35 + 1.5708;
+            let ln = exp(-pow((rang - ta) * 18.0, 2.0)) * exp(-rr * 0.3);
+            col += pal(1.0 - 0.25 * f32(j % 3)) * ln * S.d * (0.2 + 0.4 * G.kick);
+        }
+        col += pal(0.9) * 0.03 * S.d * step(0.5, fract(G.beat_phase * 2.0));
+    }
     // drop: whole room flashes with the LED colours
     col += pal(0.9) * 0.06 * G.drop;
     let vq = uv - 0.5;

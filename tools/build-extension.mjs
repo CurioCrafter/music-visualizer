@@ -9,7 +9,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const out = path.join(root, 'extension');
 const sh = path.join(out, 'shaders');
 const ORDER = ['bass_drop', 'ferrofluid', 'data_bus', 'pulse_ring', 'neon_horizon', 'reef_arcade',
-  'deep_wreck', 'moonlight_piano', 'aurora', 'classic_bars'];
+  'deep_wreck', 'moonlight_piano', 'aurora', 'classic_bars', 'storm_front', 'volcano_forge', 'hyperspace',
+  'neon_city', 'kaleido_temple', 'ink_bloom'];
 const read = (p) => readFileSync(p, 'utf8').replace(/^\uFEFF/, '');
 
 rmSync(sh, { recursive: true, force: true });

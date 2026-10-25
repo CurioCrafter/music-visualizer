@@ -32,9 +32,9 @@ struct Globals {
     beat_phase: f32,     // 0..1 position inside the current beat, from the tempo tracker
     bpm: f32,            // estimated tempo
     look_time: f32,      // seconds since this look was switched on
-    _pad0: f32,
-    _pad1: f32,
-    _pad2: f32,
+    section: f32,        // which part of the song this is: one of the SEC_* numbers below
+    section_prev: f32,   // the part before it (for cross-fades)
+    section_age: f32,    // seconds since this part started (a build-up's tension = its age)
     pal0: vec4f,         // palette stop 0 (rgb) - album-art colours when enabled
     pal1: vec4f,
     pal2: vec4f,
@@ -50,6 +50,14 @@ struct Globals {
 // the previous frame of this look (same size) - for trails, feedback, smoke
 @group(0) @binding(2) var prev_tex: texture_2d<f32>;
 @group(0) @binding(3) var samp: sampler;
+
+// song sections (G.section). Use sec(SEC_X) to blend: it cross-fades over ~1.5 s when the part changes.
+const SEC_QUIET: f32 = 0.0;      // intro / outro / near silence
+const SEC_VERSE: f32 = 1.0;      // groove, not the big part
+const SEC_BUILD: f32 = 2.0;      // build-up: snare roll / riser, tension climbing
+const SEC_CHORUS: f32 = 3.0;     // big and full
+const SEC_BREAKDOWN: f32 = 4.0;  // groove gone after a big part: no kick, little bass
+const SEC_DROP: f32 = 5.0;       // the bass slammed back in and it stays heavy
 
 const PI: f32 = 3.14159265;
 const TAU: f32 = 6.2831853;
@@ -85,6 +93,19 @@ fn wave(x: f32) -> f32 {
 // piano key glow, k = 0 (A0) .. 87 (C8)
 fn key(k: i32) -> f32 { return textureLoad(audio, vec2i(96 + clamp(k, 0, 87), 0), 0).r; }
 fn is_black_key(k: i32) -> bool { let n = k % 12; return n == 1 || n == 4 || n == 6 || n == 9 || n == 11; }
+
+// ---------- song sections ----------
+// 0..1 weight of section k right now: 1 while in it, cross-fading in/out over ~1.5 s at a change.
+// Weights of all six always add up to 1, so mix(...) or sums of sec(...) * value blend cleanly.
+fn sec(k: f32) -> f32 {
+    let t = smoothstep(0.0, 1.5, G.section_age);
+    var w = 0.0;
+    if (G.section == k) { w += t; }
+    if (G.section_prev == k) { w += 1.0 - t; }
+    return w;
+}
+// 0..1 how far into the current section (reaches 1 after `len` seconds): build-up tension, slow reveals
+fn sec_progress(len: f32) -> f32 { return clamp(G.section_age / len, 0.0, 1.0); }
 
 // ---------- colour ----------
 fn pal(x: f32) -> vec3f {

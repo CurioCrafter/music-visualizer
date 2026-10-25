@@ -60,19 +60,33 @@ fn sw_floor(x: f32) -> f32 { return -0.66 + 0.07 * fbm2(vec2f(x * 1.2, 0.5), 3) 
 
 fn look(fc: vec2f) -> vec4f {
     let uv = fc / G.res;
-    let p = centered(fc);
+    let p0 = centered(fc);
     let px = 2.0 / G.res.y;
     let t = G.time;
+    // song sections: Quiet / Verse / Build / Chorus / Breakdown / Drop
+    let sQ = sec(SEC_QUIET);
+    let sB = sec(SEC_BUILD);
+    let sC = sec(SEC_CHORUS);
+    let sK = sec(SEC_BREAKDOWN);
+    let sD = sec(SEC_DROP);
+    let bprog = select(1.0, sec_progress(12.0), G.section == SEC_BUILD) * sB;   // build-up tension 0..1
+    // camera: pushes in during the build-up, pulls wide in the chorus, punches on drop kicks
+    let zoom = 1.0 + 0.2 * bprog - 0.08 * sC - 0.04 * sK + 0.05 * G.kick * sD;
+    let shk = (vec2f(noise2(vec2f(t * 25.0, 1.0)), noise2(vec2f(t * 25.0, 9.0))) - 0.5) * (0.012 * bprog + 0.02 * sD * G.kick);
+    let p = p0 / zoom + shk;
     let A = G.aspect;
     let ph = G.beat_phase;
     let bc = floor(G.beat_count);
     let act = smoothstep(0.02, 0.08, G.energy);
-    let vis = 0.55 + 0.45 * G.energy;           // visibility: big sections clear the haze
+    let vis = clamp(0.55 + 0.45 * G.energy - 0.3 * sQ + 0.35 * sC + 0.2 * sK, 0.2, 1.2);   // visibility: big sections clear the haze
 
     // ---- water column, colour temperature from the centroid ----
     let deep = vec3f(0.0, 0.025, 0.07);
     let shallow = mix(vec3f(0.03, 0.22, 0.36), vec3f(0.06, 0.3, 0.34), G.centroid);
     var water = mix(deep, shallow, smoothstep(-1.1, 1.2, p.y));
+    water *= 1.0 - 0.45 * sQ;
+    water += vec3f(0.02, 0.15, 0.15) * sC * smoothstep(-0.6, 1.2, p.y);                       // chorus: sunlit turquoise
+    water += G.pal0.rgb * (0.06 * bprog) * (0.5 + 0.5 * sin(t * (3.0 + 8.0 * bprog)));        // build: red alarm pulse
     var col = water;
 
     // surface shimmer, rippled by the waveform
@@ -85,25 +99,28 @@ fn look(fc: vec2f) -> vec4f {
     let ang = atan2(rd.x, -rd.y);
     let rn = noise2(vec2f(ang * 9.0, t * 0.15)) * noise2(vec2f(ang * 23.0 + 3.0, t * 0.25));
     let rays = smoothstep(0.12, 0.55, rn) * smoothstep(-1.1, 1.0, p.y);
-    let breathe = 0.25 + 0.65 * G.bass + 0.25 * G.beat + 0.6 * G.drop;
-    col += vec3f(0.2, 0.5, 0.55) * rays * breathe * 0.6;
+    let breathe = (0.25 + 0.65 * G.bass + 0.25 * G.beat + 0.6 * G.drop) * (1.0 - 0.6 * sQ - 0.3 * sB) + 0.9 * sC + 0.45 * sK;
+    let raywide = rays + sC * smoothstep(0.05, 0.4, rn) * 0.6;
+    let raycol = mix(vec3f(0.2, 0.5, 0.55), G.pal1.rgb * 0.8, 0.55 * sC + 0.2 * sK);
+    col += raycol * raywide * breathe * 0.6;
 
     // ---- humpback whale gliding in the haze ----
     let wc = vec2f(A + 1.3 - fract(t * 0.008 + 0.55) * (2.0 * A + 2.6), 0.5 + sin(t * 0.1) * 0.05);
-    let wsc = 0.95;
+    let wsc = 0.95 + 0.5 * sK + 0.2 * sC + 0.25 * sQ;
     let wq = vec2f(-(p.x - wc.x), p.y - wc.y) / wsc;
     if (abs(wq.x) < 1.2 && abs(wq.y) < 0.5) {
         let wd = sw_whale(wq, t);
         let wf = fill(wd, px / wsc * 3.0);
         var wcol = water * 0.62 + vec3f(0.03, 0.07, 0.09) * smoothstep(-0.1, 0.12, wq.y);
         wcol += vec3f(0.12, 0.25, 0.28) * exp(-abs(wd) / 0.006) * step(0.0, wq.y) * 0.6;
-        col = mix(col, wcol, wf * (0.3 + 0.3 * vis));
+        col = mix(col, wcol, wf * (0.3 + 0.3 * vis + 0.3 * sK + 0.2 * sQ));
     }
 
     // ---- sonar sources: the diver on every beat, and any click ----
     let dpos = vec2f(-A * 0.62 + 0.08 * sin(t * 0.13), 0.1 + 0.06 * sin(t * 0.21));
-    let s1r = ph * 3.4;
-    let s1a = (1.0 - ph) * act;
+    let phs = mix(ph, fract(ph * (1.0 + 3.0 * bprog)), sB);   // build: sonar pings faster and faster
+    let s1r = phs * 3.4;
+    let s1a = (1.0 - phs) * act * (1.0 - 0.6 * sQ - 0.8 * sK + 0.6 * bprog);
     let cpos = vec2f((G.click_pos.x - 0.5) * A * 2.0, (0.5 - G.click_pos.y) * 2.0);
     let s2r = G.click_age * 2.4;
     let s2a = max(1.0 - G.click_age / 1.6, 0.0);
@@ -116,14 +133,17 @@ fn look(fc: vec2f) -> vec4f {
     // ---- torch: aims at the cursor, otherwise sweeps the hull; snares make it flare ----
     let tp = dpos + vec2f(0.15, -0.02);
     let wcen = vec2f(0.25, -0.4);
-    let sweep = wcen + vec2f(sin(t * 0.23) * 0.95, 0.12 + 0.12 * sin(t * 0.37));
+    var sweep = wcen + vec2f(sin(t * 0.23) * 0.95 + sin(t * 3.1) * 0.35 * sD, 0.12 + 0.12 * sin(t * 0.37));
+    sweep = mix(sweep, wcen + vec2f(0.0, 0.1), 0.9 * bprog);   // build: the beam locks onto the wreck
     let mp = vec2f((G.mouse.x - 0.5) * A * 2.0, (0.5 - G.mouse.y) * 2.0);
     let ad = normalize(mix(sweep, mp, G.mouse_on) - tp + vec2f(1e-4, 0.0));
     let rel = p - tp;
     let al = dot(rel, ad);
     let pr = length(rel - ad * al);
-    let cone = smoothstep(0.2 * al + 0.02, 0.09 * al + 0.004, pr) * step(0.0, al) * exp(-al * 0.55);
-    let tpow = 0.8 + 0.9 * G.snare + 0.3 * G.mid;
+    let cw = 1.0 - 0.45 * bprog + 0.35 * sC;
+    let cone = smoothstep((0.2 * al + 0.02) * cw, (0.09 * al + 0.004) * cw, pr) * step(0.0, al) * exp(-al * 0.55);
+    let tflick = 1.0 + bprog * (0.5 * sin(t * 37.0) + 1.2 * G.snare);
+    let tpow = (0.8 + 0.9 * G.snare + 0.3 * G.mid) * tflick * (1.0 - 0.85 * sQ - 0.85 * sK) * (1.0 + 0.5 * sD + 0.2 * sC);
     let torchc = vec3f(1.0, 0.92, 0.75);
 
     // ---- the wreck: a listing ocean liner ----
@@ -186,7 +206,7 @@ fn look(fc: vec2f) -> vec4f {
                     let r2 = length(wp - vec2f(pcx, 0.045));
                     let v1 = pow(spec(0.02 + b * 0.8), 1.3);
                     let v2 = pow(hist(0.02 + b * 0.8, 0.19), 1.3);
-                    if (r1 < 0.016) { wl = mix(vec3f(0.35, 0.25, 0.12), vec3f(1.0, 0.72, 0.32) * (0.1 + 3.0 * v1), step(r1, 0.011)); }
+                    if (r1 < 0.016) { wl = mix(vec3f(0.35, 0.25, 0.12), vec3f(1.0, 0.72, 0.32) * (0.1 + 3.0 * v1 * (1.0 + 1.5 * sD + 0.6 * sC)), step(r1, 0.011)); }
                     if (r2 < 0.014) { wl = mix(vec3f(0.35, 0.25, 0.12), G.pal1.rgb * (0.05 + 2.5 * v2), step(r2, 0.0095)); }
                     wl += vec3f(1.0, 0.7, 0.3) * v1 * 0.25 * glow(r1 - 0.011, 0.01);
                 }
@@ -216,6 +236,9 @@ fn look(fc: vec2f) -> vec4f {
                     wl = mix(wl, oc, ofl);
                 }
             }
+            // build: breaches glow red-hot; drop: the whole hull lights up
+            let hotb = smoothstep(0.55, 0.7, fbm2(wp * 4.0 + 11.0, 3)) * step(hull, 0.0);
+            wl += vec3f(1.0, 0.18, 0.06) * hotb * bprog * (0.6 + 1.5 * G.snare) + G.pal0.rgb * base * sD * (1.5 + 2.5 * G.kick);
             wl = mix(wl, water * 0.9, 0.3 * (1.0 - vis * 0.6));
             col = mix(col, wl, wf);
         }
@@ -225,6 +248,16 @@ fn look(fc: vec2f) -> vec4f {
         col += sonc * edge * 0.04;
         let rl = fill(rail, wpx) * step(-0.85, wp.x) * step(wp.x, 0.75);
         col = mix(col, vec3f(0.12, 0.1, 0.08), rl * 0.8);
+    }
+
+    // ---- DROP ONLY: the wreck erupts, rotating light shafts and a shockwave on every beat ----
+    if (sD > 0.01) {
+        let dr = p - wcen;
+        let dl = length(dr);
+        let a2 = atan2(dr.y, dr.x);
+        let shafts = pow(max(sin(a2 * 5.0 + t * 0.9 + G.travel * 0.1), 0.0), 10.0) * exp(-dl * 0.6) * (0.5 + 0.5 * noise2(vec2f(a2 * 6.0, t)));
+        let shock = exp(-abs(dl - ph * 3.0) * 12.0) * (1.0 - ph);
+        col += mix(G.pal0.rgb, G.pal1.rgb, 0.5 + 0.5 * sin(t)) * (shafts * (0.7 + 1.2 * G.kick) + shock * 0.8) * sD;
     }
 
     // ---- seafloor with dancing caustics ----
@@ -272,7 +305,7 @@ fn look(fc: vec2f) -> vec4f {
     for (var i = 0; i < 6; i++) {
         let fi = f32(i);
         let sd = hash11(fi * 3.1 + 1.0);
-        let s = 0.045 + sd * 0.04;
+        let s = (0.045 + sd * 0.04) * (1.0 + 0.7 * sK + 0.2 * sC);
         let lift = thrust * 0.035 + t * 0.012 + sd * 7.0 + fi * 0.37;
         let jp = vec2f((hash11(fi * 7.7) * 2.0 - 1.0) * A * 0.85 + sin(t * 0.2 + fi) * 0.1, -1.35 + fract(lift / 2.7) * 2.7);
         let jq = p - jp;
@@ -281,7 +314,8 @@ fn look(fc: vec2f) -> vec4f {
         let bh = s * (0.75 + 0.3 * con);
         let bd = max((length(vec2f(jq.x / bw, jq.y / bh)) - 1.0) * bh, -jq.y - bh * 0.1);
         let jc = select(G.pal0.rgb, G.pal2.rgb, sd > 0.45);
-        let pulse = 0.6 + 1.3 * G.kick + 0.3 * G.beat;
+        let pulse = 0.6 + (1.3 * G.kick + 0.3 * G.beat) * (1.0 - sK) + sK * (0.5 + 1.8 * G.mid + 1.5 * spec(0.2 + 0.1 * fi)) + 0.5 * sC;
+        let jw = select(1.0 - 0.9 * sQ, 1.0, i < 2);   // quiet: only two jellyfish drift by
         var jl = fill(bd, px) * (0.25 + 0.3 * noise2(jq * 90.0 + t)) + exp(-abs(bd) / 0.004) * 0.7 + glow(bd, 0.025) * 0.2;
         if (jq.y < 0.0) {
             for (var k = 0; k < 4; k++) {
@@ -291,19 +325,19 @@ fn look(fc: vec2f) -> vec4f {
             }
             jl += 0.5 * exp(-abs(jq.x - sin(jq.y * 20.0 + t * 2.0 + fi) * 0.01) / 0.006) * smoothstep(-s * 2.5, 0.0, jq.y);
         }
-        col += jc * jl * pulse * (0.7 + 0.3 * vis);
+        col += mix(jc, G.pal2.rgb, 0.4 * sK) * jl * pulse * jw * (0.7 + 0.3 * vis);
     }
 
     // ---- fish school: circles calmly, bursts apart on the drop ----
     let scen = vec2f(-0.35 + 0.55 * sin(t * 0.07), 0.48 + 0.12 * sin(t * 0.11));
-    let burst = 1.0 + G.drop * 5.0;
+    let burst = (1.0 - 0.55 * bprog + 0.5 * sC) + G.drop * 5.0;   // build: school tightens; chorus: wide spiral
     if (length((p - scen) * vec2f(0.6, 1.0)) < 0.35 * burst + 0.08) {
-        let nf = 24 + i32(G.quality) * 12;
+        let nf = i32(f32(24 + i32(G.quality) * 12) * (1.0 - 0.7 * sQ - 0.4 * sK));
         for (var i = 0; i < 48; i++) {
             if (i >= nf) { break; }
             let fi = f32(i);
             let hs = hash11(fi * 1.37 + 0.5);
-            let a = t * 0.35 * (1.0 + hs * 0.4) + fi * 2.39 + G.travel * 0.02;
+            let a = t * 0.35 * (1.0 + hs * 0.4) + fi * 2.39 + G.travel * 0.02 + bprog * t * 0.7;
             let rad = (0.06 + hash11(fi * 3.3) * 0.28) * burst;
             let fp = scen + vec2f(cos(a) * rad * 1.6, sin(a) * rad * 0.42 + sin(fi + t) * 0.02);
             let fq = (p - fp) * vec2f(select(1.0, -1.0, sin(a) > 0.0), 1.0);
@@ -317,7 +351,7 @@ fn look(fc: vec2f) -> vec4f {
     }
 
     // ---- bubbles: from the diver, from the wreck, more when the music is busy ----
-    let nb = 8 + i32(G.flux * 12.0);
+    let nb = min(i32((8.0 + G.flux * 12.0 + 12.0 * bprog + 6.0 * sC) * (1.0 - 0.5 * sQ)), 20);
     for (var i = 0; i < 20; i++) {
         if (i >= nb) { break; }
         let fi = f32(i);
@@ -342,6 +376,21 @@ fn look(fc: vec2f) -> vec4f {
         let dd = length(f - (h - 0.5) * 0.8);
         let flake = smoothstep(0.06 + fl2 * 0.01, 0.0, dd) * step(0.45, hash21(cell + 3.0 + fl2));
         col += vec3f(0.6, 0.75, 0.8) * flake * (0.12 + 0.35 * G.hat * h.x + cone * tpow * 1.2);
+    }
+
+    // ---- BREAKDOWN: drifting glowing plankton, each mote lit by its own part of the melody ----
+    if (sK > 0.01) {
+        let nm = 16 + i32(G.quality) * 8;
+        for (var i = 0; i < 32; i++) {
+            if (i >= nm) { break; }
+            let fi = f32(i);
+            let hs = hash11(fi * 2.9 + 0.3);
+            let mx = (hash11(fi * 5.3) * 2.0 - 1.0) * A + 0.12 * sin(t * 0.25 + fi);
+            let my = fract(t * (0.02 + 0.03 * hs) + hash11(fi * 8.1)) * 2.8 - 1.4;
+            let md = length(p - vec2f(mx, my));
+            let mb = 0.15 + 3.0 * spec(0.04 + 0.5 * hs) + 1.2 * G.mid;
+            col += mix(G.pal2.rgb, G.pal1.rgb, hs) * (exp(-md * md * 9000.0) * 1.5 + 0.0012 / (md + 0.01)) * mb * sK;
+        }
     }
 
     // ---- kelp forest framing the shot, swaying with the mids ----
@@ -371,12 +420,18 @@ fn look(fc: vec2f) -> vec4f {
     // drop: a flash of surface light from above
     col += vec3f(0.3, 0.5, 0.55) * G.drop * 0.25 * smoothstep(-1.0, 1.0, p.y);
 
+    // colour treatment per section: quiet = cold and dim, chorus = warm and golden, drop = hot flip, build = red edges
+    col = mix(col, vec3f(luma(col)) * vec3f(0.7, 0.9, 1.1), 0.4 * sQ);
+    col = col * mix(vec3f(1.0), vec3f(1.06, 1.1, 1.0), sC) + G.pal1.rgb * 0.025 * sC;
+    col = mix(col, col * vec3f(1.4, 0.88, 0.7) + G.pal0.rgb * 0.04, 0.65 * sD);
+    col += G.pal0.rgb * 0.18 * bprog * pow(length(uv - 0.5) * 1.3, 2.0) * (0.4 + 0.6 * (1.0 - ph));
+
     // vignette (depth darkness at the edges)
     col *= 1.0 - 0.45 * pow(length(uv - 0.5) * 1.3, 2.0);
 
     // ---- dive computer HUD: depth + dive time in 7-segment digits ----
     let hc = vec2f(A - 0.36, -0.8);
-    let hq = p - hc;
+    let hq = p0 - hc;
     let pd = sd_round_box(hq, vec2f(0.3, 0.135), 0.03);
     if (pd < 0.01) {
         col = mix(col, vec3f(0.01, 0.02, 0.025), fill(pd, px) * 0.8);

@@ -226,6 +226,11 @@ async function main() {
       // music from the speakers through the microphone; never played back (that would feed back)
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }, video: false });
       src = audioCtx.createMediaStreamSource(stream);
+    } else if (mode === 'external') {
+      // a host page that embeds us (e.g. the Discord Activity) supplies the node; it is analysed, not played here
+      const host = window.parent !== window ? window.parent : window;
+      if (typeof host.mvAudioSource !== 'function') throw new Error('mode=external needs the host page to define mvAudioSource(audioCtx, window).');
+      src = await host.mvAudioSource(audioCtx, window);
     } else {
       await audioCtx.audioWorklet.addModule('demo-worklet.js');
       src = new AudioWorkletNode(audioCtx, 'demo-synth', { outputChannelCount: [1] });
@@ -283,7 +288,7 @@ async function main() {
     G.set([sceneSize[0], sceneSize[1], now, dt, mOn ? mouse[0] : 0.5, mOn ? mouse[1] : 0.5, mOn, Math.min(now - clickTime, 999),
       clickPos[0], clickPos[1], a.bass, a.mid, a.high, a.vol, sig.beat, sig.drop, sig.beatCount, sig.travel,
       settings.quality, sceneSize[0] / sceneSize[1], a.kick, a.snare, a.hat, a.flux, a.centroid, a.energy, a.beatPhase, a.bpm,
-      now - lookStart, 0, 0, 0, ...palette]);
+      now - lookStart, a.section, a.sectionPrev, a.sectionAge, ...palette]);
     // Ui: count = 0 (glass UI is HTML/CSS), fx = [bloom, vignette, beat edge glow, fullscreen]
     Ui.set([sw, sh, 0, sig.beat, palette[4], palette[5], palette[6], 1, 0.9, 0.35, sig.beat * sig.beat * 0.5, fs ? 1 : 0, 0, 0, 0, 0]);
     analyzer.writeTexture(audioData);

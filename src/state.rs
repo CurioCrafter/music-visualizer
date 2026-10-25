@@ -50,6 +50,9 @@ impl Signals {
         g.beat_phase = an.beat_phase;
         g.bpm = an.bpm;
         g.look_time = look_time;
+        g.section = an.section as f32;
+        g.section_prev = an.section_prev as f32;
+        g.section_age = an.section_age;
         if g.mouse_on == 0.0 {
             g.mouse = [0.5, 0.5];
         }

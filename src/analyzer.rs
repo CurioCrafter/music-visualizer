@@ -9,6 +9,18 @@ pub const N: usize = 2048; // main FFT (~43 ms at 48 kHz)
 pub const NN: usize = 8192; // note FFT, fine enough to tell piano keys apart
 pub const HIST: usize = 64;
 
+// song sections, same numbers as the SEC_* constants in shaders/common.wgsl
+pub const QUIET: u8 = 0; // intro / outro / near silence
+pub const VERSE: u8 = 1; // groove, but not the big part
+pub const BUILD: u8 = 2; // build-up: snare roll / riser / energy climbing
+pub const CHORUS: u8 = 3; // big, full, drums + everything
+pub const BREAKDOWN: u8 = 4; // groove gone after a big part: no kick, little bass
+pub const DROP: u8 = 5; // bass slams back after a build / breakdown, while it stays bass-heavy
+// ponytail: the loudest stretch of a song is assumed to be at least this RMS (about a chorus of a
+// loudness-normalised stream, -14 LUFS), so a song's first verse isn't mistaken for its biggest part.
+// Lower it if quiet songs never reach Chorus, raise it if early verses still show as Chorus.
+const PEAK_FLOOR: f32 = 0.2;
+
 fn freq_of(b: f32) -> f32 {
     25.0 * 640f32.powf(b / (BANDS as f32 - 1.0))
 }
@@ -90,6 +102,25 @@ pub struct Analyzer {
     prev_raw: [f32; BANDS],
     vol_long: f32,
     vol_peak: f32,
+
+    pub section: u8,
+    pub section_prev: u8,
+    pub section_age: f32,
+    cand: u8,
+    cand_age: f32,
+    kick_rate: f32,
+    snare_rate: f32,
+    bass_long: f32,
+    bass_peak: f32,
+    e_fast: f32,
+    e_slow: f32,
+    hi_fast: f32,
+    hi_slow: f32,
+    last_loud: f64,
+    song_peak: f32,
+    song_t: f32,
+    silent_t: f32,
+    pub dbg: [f32; 6],
 }
 
 impl Analyzer {
@@ -141,6 +172,24 @@ impl Analyzer {
             prev_raw: [0.0; BANDS],
             vol_long: 0.0,
             vol_peak: 0.05,
+            section: QUIET,
+            section_prev: QUIET,
+            section_age: 0.0,
+            cand: QUIET,
+            cand_age: 0.0,
+            kick_rate: 0.0,
+            snare_rate: 0.0,
+            bass_long: 0.0,
+            bass_peak: 0.15,
+            e_fast: 0.0,
+            e_slow: 0.0,
+            hi_fast: 0.0,
+            hi_slow: 0.0,
+            last_loud: -100.0,
+            song_peak: PEAK_FLOOR,
+            song_t: 0.0,
+            silent_t: 0.0,
+            dbg: [0.0; 6],
         };
         a.setup(48000);
         a
@@ -242,7 +291,7 @@ impl Analyzer {
         let se = Self::avg(&self.raw, band_at(1500.0), band_at(5000.0)) * 0.6 + Self::avg(&self.raw, band_at(180.0), band_at(320.0)) * 0.4;
         let he = Self::avg(&self.raw, band_at(7000.0), BANDS - 1);
         let kick_hit = self.kick.update(ke, now, 0.12, 0.04, 8.0, dt);
-        self.snare.update(se, now, 0.12, 0.03, 7.0, dt);
+        let snare_hit = self.snare.update(se, now, 0.06, 0.03, 7.0, dt);
         self.hat.update(he, now, 0.06, 0.02, 16.0, dt);
 
         // beat = kick onset, or a bass jump above its running average
@@ -277,6 +326,7 @@ impl Analyzer {
         if self.bass_fast > 0.4 {
             self.last_big_bass = now;
         }
+        self.sections(kick_hit && ke > 0.35, snare_hit, now, dt); // a real kick has real low end, not a piano attack
 
         // history rows at 20 Hz
         self.hist_timer += dt;
@@ -292,6 +342,86 @@ impl Analyzer {
             for k in self.keys.iter_mut() {
                 *k = (*k - dt * 1.6).max(0.0);
             }
+        }
+    }
+
+    /// A new track started (from the media session, or after 3 s of silence): forget the old song's loudness.
+    pub fn new_song(&mut self) {
+        self.song_peak = PEAK_FLOOR;
+        self.song_t = 0.0;
+        self.last_loud = -100.0;
+    }
+
+    /// Which part of the song this is. Rules on slow features, then hysteresis so it never flickers:
+    /// a new section has to win for a while and the current one has to be a few seconds old.
+    fn sections(&mut self, kick_hit: bool, snare_hit: bool, now: f64, dt: f32) {
+        let ema = |v: &mut f32, x: f32, tau: f32| *v += (x - *v) * (1.0 - (-dt / tau).exp());
+        ema(&mut self.kick_rate, if kick_hit { 1.0 / dt } else { 0.0 }, 2.0);
+        ema(&mut self.snare_rate, if snare_hit { 1.0 / dt } else { 0.0 }, 1.5);
+        ema(&mut self.bass_long, self.bass, 2.0);
+        self.bass_peak = self.bass_long.max(self.bass_peak * (1.0 - dt * 0.01)).max(0.15);
+        ema(&mut self.e_fast, self.vol, 1.0);
+        ema(&mut self.e_slow, self.vol, 6.0);
+        ema(&mut self.hi_fast, self.high, 1.0);
+        ema(&mut self.hi_slow, self.high, 6.0);
+
+        let per_beat = 60.0 / self.bpm.max(60.0);
+        let kr = (self.kick_rate * per_beat).min(1.5); // ~1 = four on the floor
+        let sr = (self.snare_rate * per_beat).min(4.0); // ~0.5 = backbeat, 2+ = a roll
+        let bs = (self.bass_long / self.bass_peak).min(1.0);
+        // level: this stretch vs the loudest stretch of the song (a slow peak that fades ~0.2 %/s)
+        self.song_peak = self.vol_long.max(self.song_peak * (1.0 - dt * 0.002)).max(PEAK_FLOOR);
+        let level = self.vol_long / self.song_peak;
+        let rise = (self.e_fast - self.e_slow) / self.song_peak + (self.hi_fast - self.hi_slow) * 2.0;
+        if level > 0.85 {
+            self.last_loud = now;
+        }
+        let after_big = now - self.last_loud < 40.0;
+        self.song_t += dt;
+        self.silent_t = if self.vol < 0.003 { self.silent_t + dt } else { 0.0 };
+        if self.silent_t > 3.0 {
+            self.new_song(); // 3 s of real silence: probably a new song (soft intros don't count)
+        }
+        self.dbg = [level, kr, sr, bs, rise, self.vol_long];
+
+        let want = if self.section == DROP && now - self.last_drop < 60.0 && level > 0.8 {
+            DROP
+        } else if level < 0.3 {
+            QUIET
+        } else if (rise > 0.25 && level < 0.9 || sr > 2.5) && bs < 0.75 {
+            BUILD
+        } else if after_big && level < 0.7 && (bs < 0.5 || kr < 0.3) {
+            BREAKDOWN
+        } else if kr < 0.3 && bs < 0.4 && !after_big {
+            QUIET // no groove yet: an intro
+        } else if level > 0.85 && self.song_t > 30.0 {
+            CHORUS // the first 30 s can't be the big part: the song's real peak hasn't been heard yet
+        } else {
+            VERSE
+        };
+
+        if want == self.cand {
+            self.cand_age += dt;
+        } else {
+            self.cand = want;
+            self.cand_age = 0.0;
+        }
+        self.section_age += dt;
+        // a drop right after a build-up or breakdown switches at once: the bass slamming back, or the
+        // loudness jumping up to the song's big level. Drums merely coming in after an intro don't count.
+        let jump = rise > 0.35 && level > 0.75;
+        let slam = (self.drop || jump) && (self.section == BUILD || self.section == BREAKDOWN) && self.section_age > 1.0 && self.song_t > 20.0;
+        if slam {
+            self.last_drop = now;
+        }
+        // song parts last 8+ bars: a new part has to win for a while, and the current one gets at least 6 s
+        let hold = if want == BUILD { 1.0 } else { 2.0 };
+        let min_len = if self.section == QUIET { 2.0 } else { 6.0 };
+        let next = if slam { DROP } else if self.cand != self.section && self.cand_age > hold && self.section_age > min_len { self.cand } else { self.section };
+        if next != self.section {
+            self.section_prev = self.section;
+            self.section = next;
+            self.section_age = 0.0;
         }
     }
 
@@ -333,27 +463,63 @@ impl Analyzer {
     }
 }
 
-/// Synthetic 128 BPM test song: kick, wobbling sub, chords, piano notes, hats; a breakdown every
-/// 16 beats so the drop fires. Used by `--shots`.
+/// Synthetic 128 BPM test song with a real arrangement (82 s, loops), so every section shows up:
+/// intro | verse | build-up | drop | breakdown | verse | chorus | outro. Used by `--shots`, `--stills`, `--reel`.
+pub const SONG: [(&str, f64, f64); 8] = [
+    // (name, first beat, last beat)
+    ("intro", 0.0, 16.0),
+    ("verse", 16.0, 48.0),
+    ("build", 48.0, 64.0),
+    ("drop", 64.0, 96.0),
+    ("breakdown", 96.0, 112.0),
+    ("verse", 112.0, 128.0),
+    ("chorus", 128.0, 160.0),
+    ("outro", 160.0, 176.0),
+];
+pub const SONG_BEATS: f64 = 176.0;
+pub const SONG_BEAT: f64 = 60.0 / 128.0;
+
 pub fn synth(time: f64, rng: &mut u32) -> f32 {
     use std::f64::consts::PI;
-    let beat = 60.0 / 128.0;
+    let beat = SONG_BEAT;
+    let b = (time / beat) % SONG_BEATS;
+    let i = SONG.iter().position(|s| b >= s.1 && b < s.2).unwrap_or(0);
+    let part = SONG[i].0;
+    let pb = b - SONG[i].1; // beats into this part
     let tb = time % beat;
-    let section = (time / beat) as u64 % 16;
-    let breakdown = section >= 12; // last 4 beats of every 16: no drums, no sub
+    *rng = rng.wrapping_mul(1664525).wrapping_add(1013904223);
+    let noise = (*rng >> 8) as f64 / (1u32 << 24) as f64 * 2.0 - 1.0;
+    let osc = |f: f64| (2.0 * PI * f * time).sin();
+
+    // layer levels per part: (kick, sub, wobble, snare, hats, chords, piano, master)
+    let (kick_l, sub_l, wob, snare_l, hat_l, chord_l, piano_l, master) = match part {
+        "intro" => (0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.6, 0.35),
+        "verse" => (0.6, 0.0, 0.0, 0.5, 0.6, 0.8, 1.0, 0.75),
+        "build" => (if pb < 8.0 { 0.6 } else { 0.0 }, 0.0, 0.0, 0.0, 0.4, 0.8, 0.0, 0.7 + 0.3 * pb / 16.0),
+        "drop" => (1.0, 1.0, 1.0, 1.0, 1.0, 0.7, 0.4, 1.0),
+        "breakdown" => (0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.6),
+        "chorus" => (0.8, 0.5, 0.0, 1.0, 1.0, 1.6, 1.0, 1.25),
+        _ => (0.0, 0.0, 0.0, 0.0, 0.3 * (1.0 - pb / 16.0), 0.8 * (1.0 - pb / 20.0), 0.5, 0.35),
+    };
     let kick_f = 45.0 + 90.0 * (-tb * 30.0).exp();
-    let kick = if breakdown { 0.0 } else { (2.0 * PI * kick_f * tb).sin() * (-tb * 9.0).exp() * 0.8 };
+    let kick = (2.0 * PI * kick_f * tb).sin() * (-tb * 9.0).exp() * 0.8 * kick_l;
     let duck = 1.0 - (-tb * 8.0).exp();
-    let sub = if breakdown { 0.0 } else { (2.0 * PI * 55.0 * time + (2.0 * PI * 4.0 * time).sin() * 2.0).sin() * 0.3 * duck };
-    let chord = ((2.0 * PI * 220.0 * time).sin() + (2.0 * PI * 277.2 * time).sin() + (2.0 * PI * 329.6 * time).sin()) * 0.05;
+    let sub = (2.0 * PI * 55.0 * time + wob * (2.0 * PI * 4.0 * time).sin() * 2.0).sin() * 0.3 * duck * sub_l;
+    let chord = (osc(220.0) + osc(277.2) + osc(329.6)) * 0.05 * chord_l;
     const SCALE: [f64; 7] = [440.0, 494.0, 554.0, 659.0, 740.0, 880.0, 988.0];
     let note = SCALE[((time / (beat / 2.0)) as usize * 7) % 7];
     let tn = time % (beat / 2.0);
-    let piano = ((2.0 * PI * note * time).sin() + 0.4 * (4.0 * PI * note * time).sin()) * (-tn * 5.0).exp() * 0.2;
-    *rng = rng.wrapping_mul(1664525).wrapping_add(1013904223);
-    let noise = (*rng >> 8) as f64 / (1u32 << 24) as f64 * 2.0 - 1.0;
+    let piano = ((2.0 * PI * note * time).sin() + 0.4 * (4.0 * PI * note * time).sin()) * (-tn * 5.0).exp() * 0.2 * piano_l;
     let th = time % (beat / 2.0);
-    let hat = noise * (-th * 70.0).exp() * 0.12;
-    let snare = if breakdown || ((time / beat) as u64 % 2 == 0) { 0.0 } else { noise * (-tb * 18.0).exp() * 0.35 };
-    (kick + sub + chord + piano + hat + snare) as f32
+    let hat = noise * (-th * 70.0).exp() * 0.12 * hat_l;
+    let snare = if (time / beat) as u64 % 2 == 0 { 0.0 } else { noise * (-tb * 18.0).exp() * 0.35 * snare_l };
+    // build-up: a snare roll that speeds up (1, 2, 4, 8 hits a beat) and a rising noise riser
+    let (roll, riser) = if part == "build" {
+        let div = [1.0, 2.0, 4.0, 8.0][(pb / 4.0) as usize % 4];
+        let tr = time % (beat / div);
+        (noise * (-tr * 30.0).exp() * 0.3 * (0.5 + pb / 32.0), (noise * 0.04 + osc(200.0 * 2f64.powf(pb / 4.0)) * 0.03) * pb / 16.0)
+    } else {
+        (0.0, 0.0)
+    };
+    ((kick + sub + chord + piano + hat + snare + roll + riser) * master) as f32
 }

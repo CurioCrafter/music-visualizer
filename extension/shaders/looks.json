@@ -88,5 +88,59 @@
       "#ffd21a",
       "#ff2a1a"
     ]
+  },
+  {
+    "file": "storm_front.wgsl",
+    "name": "Storm Front",
+    "palette": [
+      "#8cc8ff",
+      "#b48cff",
+      "#ffcf7a"
+    ]
+  },
+  {
+    "file": "volcano_forge.wgsl",
+    "name": "Volcano Forge",
+    "palette": [
+      "#ff3a12",
+      "#ff9a2a",
+      "#ffe07a"
+    ]
+  },
+  {
+    "file": "hyperspace.wgsl",
+    "name": "Hyperspace",
+    "palette": [
+      "#3cc8ff",
+      "#b04dff",
+      "#ff8a3c"
+    ]
+  },
+  {
+    "file": "neon_city.wgsl",
+    "name": "Neon City",
+    "palette": [
+      "#ff2e88",
+      "#22e5ff",
+      "#ffb22e"
+    ]
+  },
+  {
+    "file": "kaleido_temple.wgsl",
+    "name": "Kaleido Temple",
+    "palette": [
+      "#ffbe3c",
+      "#12b5a0",
+      "#d0306e"
+    ]
+  },
+  {
+    "file": "ink_bloom.wgsl",
+    "name": "Ink Bloom",
+    "palette": [
+      "#1f4fd6",
+      "#e0306a",
+      "#f2b21c"
+    ]
   }
 ]

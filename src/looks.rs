@@ -25,6 +25,12 @@ pub const LOOKS: &[Look] = &[
     look!("moonlight_piano.wgsl"),
     look!("aurora.wgsl"),
     look!("classic_bars.wgsl"),
+    look!("storm_front.wgsl"),
+    look!("volcano_forge.wgsl"),
+    look!("hyperspace.wgsl"),
+    look!("neon_city.wgsl"),
+    look!("kaleido_temple.wgsl"),
+    look!("ink_bloom.wgsl"),
 ];
 
 pub fn header(src: &str, key: &str) -> Option<String> {
