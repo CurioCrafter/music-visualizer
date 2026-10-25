@@ -133,7 +133,7 @@ fn look(fc: vec2f) -> vec4f {
         col = mix(col, pcol, clamp(plume, 0.0, 1.0) * 0.9);
         // drop: volcanic lightning in the ash on snares and kicks
         let li = (G.snare + 0.6 * G.kick) * wd;
-        if (li > 0.02 && abs(pq.x) < 1.2) {
+        if (li > 0.02 && abs(pq.x) < 3.5) {
             let seed = bc * 3.3 + floor(t * 6.0);
             let ly = py;
             let lx = pcx + (hash11(seed) - 0.5) * pw * 1.2 + (noise2(vec2f(ly * 12.0, seed)) - 0.5) * 0.15 + (noise2(vec2f(ly * 40.0, seed + 2.0)) - 0.5) * 0.04;
@@ -178,12 +178,12 @@ fn look(fc: vec2f) -> vec4f {
     if (wd > 0.01) {
         let fh = 0.25 + 0.35 * G.kick + 0.2 * G.bass + 0.2 * G.drop;
         let fy = (p.y - ctop.y) / fh;
-        if (fy > -0.05 && fy < 1.3) {
+        if (fy > -0.05 && fy < 1.7) {
             let fw = 0.03 + 0.06 * fy + 0.01 * sin(fy * 20.0 - t * 30.0);
             let fx = abs(p.x - ctop.x - 0.04 * fy * fy) / fw;
             let fnz = fbm2(vec2f(fx * 2.0, fy * 4.0 - t * 4.0), 3);
             let fnt = smoothstep(1.0, 0.2, fx + (0.5 - fnz)) * smoothstep(1.2, 0.3, fy + (0.5 - fnz) * 0.5);
-            col += vf_heat(0.7 + 0.5 * (1.0 - fy) + 0.3 * fnz) * fnt * wd * 1.3;
+            col += vf_heat(0.7 + 0.5 * (1.0 - fy) + 0.3 * fnz) * fnt * wd * 1.3 * smoothstep(-0.05, 0.0, fy);
         }
         let nb = 10 + i32(G.quality) * 5;
         for (var i = 0; i < 20; i++) {
@@ -197,7 +197,7 @@ fn look(fc: vec2f) -> vec4f {
             let vel = v0 + vec2f(0.0, -2.6) * life;
             let bd = sd_segment(p, pos, pos - vel * 0.06) - 0.006;
             if (bd < 0.1) {
-                col += vf_heat(1.0 - life * 0.6) * (fill(bd, px) + glow(bd, 0.008) * 0.3) * wd * (1.0 - life * 0.7);
+                col += vf_heat(1.0 - life * 0.6) * (fill(bd, px) + glow(bd, 0.008) * 0.3 * smoothstep(0.1, 0.03, bd)) * wd * (1.0 - life * 0.7);
             }
         }
     }
@@ -325,7 +325,7 @@ fn look(fc: vec2f) -> vec4f {
             let sdd = sd_segment(p, pos, pos - vel * 0.035);
             if (sdd > 0.05) { continue; }
             let k = 1.0 - sage / life;
-            col += vf_heat(0.75 + 0.4 * k) * (fill(sdd - px * 0.4, px) * 1.2 + glow(sdd, 0.004) * 0.15) * k * strikeW;
+            col += vf_heat(0.75 + 0.4 * k) * (fill(sdd - px * 0.4, px) * 1.2 + glow(sdd, 0.004) * 0.15 * smoothstep(0.05, 0.015, sdd)) * k * strikeW;
         }
     }
     // click: a burst of sparks where you clicked
@@ -356,7 +356,7 @@ fn look(fc: vec2f) -> vec4f {
         let q = vec2f(ep.x * scl + sin(ep.y * 3.0 + t * 0.7 + fl) * 0.6 - t * 0.2 * (1.0 + fl), ep.y * scl - t * spd * scl);
         let ci = floor(q);
         let h = hash22(ci + fl * 17.0);
-        let dd = length(fract(q) - 0.5 - (h - 0.5) * 0.7);
+        let dd = length(fract(q) - 0.5 - (h - 0.5) * 0.4);   // centre >= 0.3 from the cell border so the bokeh ring is never clipped
         let on = step(1.0 - emb * mix(0.12 + 0.05 * fl, 0.22, wk), hash21(ci + 5.0 + fl));
         let fl2 = 0.55 + 0.45 * sin(t * (4.0 + h.x * 8.0) + h.y * 20.0);
         let sz = mix(0.05 + 0.03 * fl, 0.09, wk);

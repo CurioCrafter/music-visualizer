@@ -316,7 +316,7 @@ fn look(fc: vec2f) -> vec4f {
         let jc = select(G.pal0.rgb, G.pal2.rgb, sd > 0.45);
         let pulse = 0.6 + (1.3 * G.kick + 0.3 * G.beat) * (1.0 - sK) + sK * (0.5 + 1.8 * G.mid + 1.5 * spec(0.2 + 0.1 * fi)) + 0.5 * sC;
         let jw = select(1.0 - 0.9 * sQ, 1.0, i < 2);   // quiet: only two jellyfish drift by
-        var jl = fill(bd, px) * (0.25 + 0.3 * noise2(jq * 90.0 + t)) + exp(-abs(bd) / 0.004) * 0.7 + glow(bd, 0.025) * 0.2;
+        var jl = fill(bd, px) * (0.25 + 0.3 * noise2(jq * 90.0 + t)) + exp(-abs(bd) / 0.004) * 0.7 + glow(bd, 0.025) * 0.2 * smoothstep(0.0, s * 1.2, min(min(s * 2.2 - abs(jq.x), s * 1.6 - jq.y), jq.y + s * 5.0));
         if (jq.y < 0.0) {
             for (var k = 0; k < 4; k++) {
                 let fk = f32(k);

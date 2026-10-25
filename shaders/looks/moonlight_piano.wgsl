@@ -46,7 +46,7 @@ fn mp_lantern(lp: vec2f, sz: f32, fl: f32, px: f32) -> vec3f {
     let d = sd_round_box(p, vec2f(sz * 0.62, sz), sz * 0.35);
     let warm = mix(G.pal1.rgb, vec3f(1.0, 0.42, 0.12), 0.45);
     let inner = 1.0 + 1.2 * smoothstep(sz, -sz, lp.y);
-    return warm * fl * (fill(d, px) * 1.3 * inner + glow(d, sz * 1.2) * 0.22 + exp(-dot(lp, lp) / (sz * sz * 30.0)) * 0.12);
+    return warm * fl * (fill(d, px) * 1.3 * inner + (glow(d, sz * 1.2) * 0.22 + exp(-dot(lp, lp) / (sz * sz * 30.0)) * 0.12) * smoothstep(0.12, 0.05, max(abs(lp.x), abs(lp.y))));
 }
 
 // everything above the horizon; also sampled mirrored for the lake reflection
@@ -80,15 +80,15 @@ fn mp_sky(q: vec2f, moon: vec2f) -> vec3f {
     let sg = q * 34.0;
     let sc = floor(sg);
     let sh = hash21(sc);
-    let sd = length(fract(sg) - (hash22(sc) * 0.7 + 0.15));
+    let sd = length(fract(sg) - (hash22(sc) * 0.5 + 0.25));
     let tw = 0.55 + 0.45 * sin(t * (1.0 + 4.0 * hash21(sc + 7.0)) + sh * 60.0) + G.hat * G.high * 1.2 * step(0.6, hash21(sc + 3.0));
     var stars = smoothstep(0.72, 1.0, sh) * tw * exp(-sd * sd * 160.0) * 1.4;
     let bg = q * 9.0;
     let bc = floor(bg);
     let bh = hash21(bc + 31.0);
-    let bo = fract(bg) - (hash22(bc + 5.0) * 0.6 + 0.2);
+    let bo = fract(bg) - (hash22(bc + 5.0) * 0.3 + 0.35);
     let btw = 0.6 + 0.4 * sin(t * (0.7 + 2.0 * hash21(bc)) + bh * 30.0) + G.high * 0.6;
-    let spike = exp(-abs(bo.x) * 90.0) * exp(-abs(bo.y) * 9.0) + exp(-abs(bo.y) * 90.0) * exp(-abs(bo.x) * 9.0);
+    let spike = exp(-abs(bo.x) * 90.0) * exp(-abs(bo.y) * 9.0) * smoothstep(0.35, 0.15, abs(bo.y)) + exp(-abs(bo.y) * 90.0) * exp(-abs(bo.x) * 9.0) * smoothstep(0.35, 0.15, abs(bo.x));
     stars += step(0.86, bh) * btw * (exp(-dot(bo, bo) * 1200.0) * 2.5 + spike * 0.35) * (0.7 + 0.6 * G.energy);
     stars *= smoothstep(0.02, 0.35, hh) * (1.0 - cloud) * smoothstep(0.14, 0.3, md) * (1.0 - 0.6 * sQ + 0.7 * sK + 0.8 * bp);
     col += vec3f(0.85, 0.9, 1.0) * stars;
@@ -183,7 +183,7 @@ fn mp_sky(q: vec2f, moon: vec2f) -> vec3f {
     let bx2 = mix(18.0, 84.0, s + 0.004) / 95.0;
     let base = MP_H + 0.24;
     var mel = vec3f(0.0);
-    if (hh > 0.1 && hh < 0.85) {
+    if (hh > 0.04 && hh < 1.1) {
     for (var e = 0; e < 6; e++) {
         let fe = f32(e);
         var v = spec(bx);
@@ -374,10 +374,13 @@ fn look(fc: vec2f) -> vec4f {
         let bh = 0.45 + 0.9 * G.energy + 0.8 * G.drop + 1.5 * sK + 0.5 * sC;   // breakdown: the keys' beams soar high into the sky
         let shim = 0.7 + 0.3 * noise2(vec2f(fw * 3.0, q.y * 7.0 - t * 2.5));
         var beam = vec3f(0.0);
+        for (var dw = -1; dw <= 1; dw++) {   // neighbours too, so the beam is not cut at the key border
+            let ww = i32(floor(fw)) + dw;
+            if (ww >= 0 && ww < 36) {
+                beam += G.pal1.rgb * key(mp_wkey(ww)) * exp(-mp_sq((fw - f32(ww) - 0.5) * 3.2));
+            }
+        }
         if (fw >= 0.0 && fw < 36.0) {
-            let w = i32(floor(fw));
-            let f = fract(fw);
-            beam += G.pal1.rgb * key(mp_wkey(w)) * exp(-mp_sq((f - 0.5) * 3.2));
             let b = i32(round(fw));
             let bk = mp_bkey(b - 1);
             if (bk >= 0) {

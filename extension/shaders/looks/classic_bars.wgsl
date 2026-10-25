@@ -245,7 +245,7 @@ fn cb_device(q: vec2f, px: f32, a: f32, m: vec2f) -> vec3f {
             // inner LED highlight
             g += vec3f(1.0) * lm * (lit + ispk) * 0.25 * smoothstep(0.2, 0.0, abs(fs - 0.62));
             // light spill onto the black mask
-            g += lc * (lit * 0.06 + ispk * 0.05) * (1.0 - lm);
+            g += lc * (lit * 0.06 + ispk * 0.05) * (1.0 - lm) * smoothstep(0.07, 0.0, led);   // fades out before the cell border (no lit rectangles)
         }
         // glass: diagonal reflection, mouse spotlight, edge darkening
         g += vec3f(0.9, 0.95, 1.0) * 0.05 * smoothstep(0.08, 0.0, abs((q.x - gc.x) * 0.35 + (q.y - gc.y) - 0.18));
@@ -428,7 +428,7 @@ fn look(fc: vec2f) -> vec4f {
     col += vec3f(0.8, 0.85, 1.0) * 0.05 * exp(-dot(p - m, p - m) * 2.0);
     // the bars light the wall above the rack
     let wx = clamp((p.x + a - 0.36) / (a * 1.3 - 0.4), 0.0, 1.0);
-    col += pal(spec(wx) * 0.8) * spec(wx) * 0.12 * exp(-max(p.y - 0.64, 0.0) * 3.0) * step(0.64, p.y);
+    col += pal(spec(wx) * 0.8) * spec(wx) * 0.12 * exp(-max(p.y - 0.64, 0.0) * 3.0) * smoothstep(0.54, 0.64, p.y);
     let floorY = -0.6;
     if (p.y < floorY) {
         // glossy floor with the device reflected in it

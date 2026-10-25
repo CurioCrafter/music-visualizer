@@ -129,12 +129,24 @@ fn luma(c: vec3f) -> f32 { return dot(c, vec3f(0.299, 0.587, 0.114)); }
 
 // ---------- maths / noise ----------
 fn rot(a: f32) -> mat2x2f { let c = cos(a); let s = sin(a); return mat2x2f(c, s, -s, c); }
-fn hash11(p: f32) -> f32 { return fract(sin(p * 127.1) * 43758.5453); }
-fn hash21(p: vec2f) -> f32 { return fract(sin(dot(p, vec2f(127.1, 311.7))) * 43758.5453); }
-fn hash22(p: vec2f) -> vec2f {
-    return fract(sin(vec2f(dot(p, vec2f(127.1, 311.7)), dot(p, vec2f(269.5, 183.3)))) * 43758.5453);
+// sine-free hashes (Dave Hoskins): sin(x * 43758) loses precision on GPUs once x gets large (time
+// grows all session), which made noise jump at cell borders and left hard straight edges
+fn hash11(p: f32) -> f32 { var x = fract(p * 0.1031); x *= x + 33.33; x *= x + x; return fract(x); }
+fn hash21(p: vec2f) -> f32 {
+    var p3 = fract(vec3f(p.x, p.y, p.x) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
 }
-fn hash31(p: vec3f) -> f32 { return fract(sin(dot(p, vec3f(127.1, 311.7, 74.7))) * 43758.5453); }
+fn hash22(p: vec2f) -> vec2f {
+    var p3 = fract(vec3f(p.x, p.y, p.x) * vec3f(0.1031, 0.1030, 0.0973));
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.xx + p3.yz) * p3.zy);
+}
+fn hash31(p: vec3f) -> f32 {
+    var p3 = fract(p * 0.1031);
+    p3 += dot(p3, p3.zyx + 31.32);
+    return fract((p3.x + p3.y) * p3.z);
+}
 fn noise2(p: vec2f) -> f32 {
     let i = floor(p); let f = fract(p);
     let u = f * f * (3.0 - 2.0 * f);

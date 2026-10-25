@@ -57,7 +57,7 @@ fn kt_bg(p: vec2f, t: f32) -> vec3f {
     let g = p * 55.0;
     let ci = floor(g);
     let h = hash21(ci);
-    let sd = length(fract(g) - hash22(ci) * 0.7 - 0.15);
+    let sd = length(fract(g) - hash22(ci) * 0.4 - 0.3);   // centre >= 0.3 from the cell border
     c += vec3f(1.0, 0.9, 0.75) * step(0.93, h) * exp(-sd * sd * 120.0) * (0.25 + 0.5 * G.hat * step(0.97, h));
     return c;
 }
@@ -104,8 +104,9 @@ fn kt_mandala(p0: vec2f, n: f32, spin: f32, inflow: f32, heat: f32, px: f32) -> 
         let dir = select(-1.0, 1.0, (i & 1) == 0);
         let rr = fract(fi / 6.0 + 0.08 - inflow);
         let R = 0.10 + rr * 1.4;
-        let fade = smoothstep(0.0, 0.12, rr) * smoothstep(1.0, 0.8, rr);
         let w = 0.05 + 0.06 * R;
+        // soft window: the slow 1/d halos below reach zero before the annulus early-out
+        let fade = smoothstep(0.0, 0.12, rr) * smoothstep(1.0, 0.8, rr) * smoothstep(w * 2.2, w * 1.5, abs(r - R));
         if (abs(r - R) > w * 2.2 || fade < 0.01) { continue; }
         let kind = i % 3;
         let nn = n * select(1.0, 2.0, kind == 1);
@@ -232,7 +233,7 @@ fn kt_petals(p: vec2f, px: f32) -> vec3f {
             let inside = fill(d, px);
             let fres = exp(-abs(d) / (px * 2.0 + 0.003));
             col += tint * (inside * (0.08 + 0.12 * smoothstep(-W, 0.0, d) + 0.7 * mel) + fres * (0.35 + 1.2 * mel));
-            col += tint * mel * 0.012 / (max(d, 0.0) + 0.012);
+            col += tint * mel * 0.012 / (max(d, 0.0) + 0.012) * smoothstep(0.1, 0.03, d);
             col += vec3f(1.0) * inside * exp(-abs(lp.y) / (px * 1.2)) * 0.15;                  // vein
             col += vec3f(1.0) * inside * exp(-dot(lp - vec2f(-L * 0.3, W * 0.4), lp - vec2f(-L * 0.3, W * 0.4)) * 2000.0) * 0.5;
         }
@@ -279,7 +280,7 @@ fn kt_dome(p: vec2f, px: f32) -> vec3f {
                 let rl = vec2f(f.x * 1.4, f.y);
                 let g = kt_gem(rl, 0.12 + 0.03 * G.beat, mix(G.pal1.rgb, G.pal2.rgb, step(0.5, fract(cell.x * 0.5))) * (0.8 + 1.5 * rb), cpx);
                 c = mix(c, g.xyz * light, g.w);
-                c += mix(G.pal1.rgb, G.pal0.rgb, 0.5) * 0.02 / (length(rl) + 0.03) * rb * light;
+                c += mix(G.pal1.rgb, G.pal0.rgb, 0.5) * 0.02 / (length(rl) + 0.03) * rb * light * smoothstep(0.24, 0.1, length(rl));
             }
         }
         c += vec3f(1.0, 0.9, 0.7) * exp(-abs(outer) / cpx) * 0.5 * light;    // highlight on the rib edges

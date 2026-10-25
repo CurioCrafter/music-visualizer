@@ -3,16 +3,36 @@
 // A night thunderstorm rolling in over the sea: painterly fbm clouds, rain curtains, a lighthouse
 // headland, wind-bent dune grass and lightning. Every song section changes the weather.
 
+// sin-free value noise: common noise2()'s sin(dot*43758) hash loses precision for big arguments (late in the song),
+// so a lattice point can hash differently on the two sides of a cell border -> straight-edged glassy shards.
+fn sf_h(p: vec2f) -> f32 {
+    var p3 = fract(vec3f(p.x, p.y, p.x) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+fn sf_nz(p: vec2f) -> f32 {
+    let i = floor(p); let f = fract(p);
+    let u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(sf_h(i), sf_h(i + vec2f(1.0, 0.0)), u.x), mix(sf_h(i + vec2f(0.0, 1.0)), sf_h(i + vec2f(1.0, 1.0)), u.x), u.y);
+}
+
+fn sf_fbm(p0: vec2f, oct: i32) -> f32 {
+    var p = p0; var a = 0.5; var s = 0.0;
+    for (var i = 0; i < oct; i++) { s += a * sf_nz(p); p = p * 2.03 + vec2f(1.7, 9.2); a *= 0.5; }
+    return s;
+}
 fn sf_n1(x: f32, s: f32) -> f32 { return noise2(vec2f(x, s * 13.7)) - 0.5; }
 
 // jagged lightning bolt from (x0, top) down to y = bot, with two forks. Returns a distance.
 fn sf_bolt(p: vec2f, x0: f32, top: f32, bot: f32, seed: f32) -> f32 {
-    if (p.y > top + 0.02 || p.y < bot - 0.01 || abs(p.x - x0) > 0.6) { return 1e3; }
+    // early-out only where the bolt halo is < 1/255; inside it, distance grows past the bolt's ends
+    if (p.y > top + 0.4 || p.y < bot - 0.4 || abs(p.x - x0) > 0.9) { return 1e3; }
+    let endd = max(max(p.y - top - 0.01, bot - p.y), 0.0);
     let s = clamp((top - p.y) / (top - bot), 0.0, 1.0);
     let y = p.y;
     let bx = x0 + sf_n1(y * 4.0, seed) * 0.4 * s + sf_n1(y * 14.0, seed + 1.0) * 0.09 * (0.3 + s)
                 + sf_n1(y * 47.0, seed + 2.0) * 0.022;
-    var d = abs(p.x - bx);
+    var d = abs(p.x - bx) + endd;
     for (var k = 0; k < 2; k++) {
         let fk = f32(k);
         let s0 = 0.15 + 0.35 * hash11(seed * 3.1 + fk);
@@ -22,7 +42,7 @@ fn sf_bolt(p: vec2f, x0: f32, top: f32, bot: f32, seed: f32) -> f32 {
             let u = (s - s0) * (top - bot);
             let brx = bx + dir * u * (0.5 + 0.7 * hash11(seed + fk * 9.0)) + sf_n1(y * 31.0, seed + 4.0 + fk) * 0.1 * u;
             let fade = (s - s0) / (s1 - s0);
-            d = min(d, abs(p.x - brx) + fade * 0.006);
+            d = min(d, abs(p.x - brx) + fade * 0.006 + smoothstep(0.6, 1.0, fade) * 0.4 + endd);
         }
     }
     return d;
@@ -155,9 +175,9 @@ fn look(fc: vec2f) -> vec4f {
     var cp = vec2f(cq.x * zz * 0.55, zz * 0.9);
     cp += vec2f(t * 0.02 * (0.3 + wind), t * (0.04 + 0.1 * wind) + G.travel * 0.01);
     let oct = 4 + i32(G.quality > 1.5);
-    let wrp = vec2f(fbm2(cp * 1.2 + vec2f(t * 0.03, 0.0), 3), fbm2(cp * 1.2 + vec2f(5.2, 1.3 - t * 0.02), 3));
-    let n = fbm2(cp * 1.5 + wrp * 1.9, oct);
-    let n2 = fbm2(cp * 3.3 + vec2f(t * 0.3 * wind, t * 0.08), 3);
+    let wrp = vec2f(sf_fbm(cp * 1.2 + vec2f(t * 0.03, 0.0), 3), sf_fbm(cp * 1.2 + vec2f(5.2, 1.3 - t * 0.02), 3));
+    let n = sf_fbm(cp * 1.5 + wrp * 1.9, oct);
+    let n2 = sf_fbm(cp * 3.3 + vec2f(t * 0.3 * wind, t * 0.08), 3);
     var cov = 0.18 * wq + 0.62 * wv + (0.68 + 0.27 * bp) * wb + 0.95 * wd + 0.72 * wc + 0.6 * wk;
     cov += wq * (0.42 * smoothstep(0.1, -0.25, p.y));                                    // quiet: a low bank on the horizon
     cov -= kopen * 0.9 * smoothstep(1.15, 0.2, length((p - moonP + vec2f(0.4, 0.15)) * vec2f(0.5, 0.9)));  // breakdown: the eye opens
@@ -187,8 +207,8 @@ fn look(fc: vec2f) -> vec4f {
     ccol += G.pal0.rgb * wc * (0.12 + 0.35 * pow(1.0 - ph, 3.0)) * (0.5 + 0.5 * noise2(p * 2.0 + bc));
     ccol += G.pal2.rgb * wc * 0.35 * smoothstep(0.5, -0.2, p.y) * (1.0 - shade * 0.5);
     // build-up: static charge crawling through the clouds
-    let ridge = 1.0 - abs(2.0 * noise2(cp * 4.0 + vec2f(t * 1.7, -t * 1.1)) - 1.0);
-    let ridge2 = 1.0 - abs(2.0 * noise2(cp * 9.0 - vec2f(t * 2.3, t * 0.7) + 3.0) - 1.0);
+    let ridge = 1.0 - abs(2.0 * sf_nz(cp * 4.0 + vec2f(t * 1.7, -t * 1.1)) - 1.0);
+    let ridge2 = 1.0 - abs(2.0 * sf_nz(cp * 9.0 - vec2f(t * 2.3, t * 0.7) + 3.0) - 1.0);
     let charge = (pow(ridge, 40.0) + pow(ridge2, 60.0) * 0.7) * dens * bp * (0.7 + 2.0 * G.high + 1.5 * G.snare);
     ccol += mix(G.pal1.rgb, G.pal0.rgb, ridge2) * charge * 2.2;
 

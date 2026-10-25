@@ -406,8 +406,9 @@ fn look(fc: vec2f) -> vec4f {
     let open = smoothstep(0.0, 0.08, G.drop);
     if (open > 0.0) {
         let gq = v - vec2f(chx, cfy - 8.0);
-        if (gq.y < 0.0 && abs(gq.x) < -gq.y * 0.45 + 6.0) {
-            col += G.pal1.rgb * 0.6 * open * exp(gq.y / 22.0) * step(0.5, fract(atan2(gq.x, -gq.y) * 3.0 + t * 2.0));
+        let cone_w = -gq.y * 0.45 + 6.0;
+        if (gq.y < 0.0 && abs(gq.x) < cone_w) {
+            col += G.pal1.rgb * 0.6 * open * exp(gq.y / 22.0) * smoothstep(1.0, 0.6, abs(gq.x) / cone_w) * step(0.5, fract(atan2(gq.x, -gq.y) * 3.0 + t * 2.0));
         }
     }
     let chq = v - vec2f(chx + floor(sin(t * 50.0) * G.kick * 1.5) * (1.0 - open), cfy);

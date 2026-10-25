@@ -136,7 +136,7 @@ fn look(fc: vec2f) -> vec4f {
         let sg = floor(p * 28.0);
         let sh = hash21(sg + floor(G.beat_count * 2.0));
         let so = length(fract(p * 28.0) - hash22(sg) * 0.6 - 0.2);
-        c = ib_ink(c, k2, step(0.996, sh) * smoothstep(0.25, 0.1, so) * G.snare * (wv + wb + wc));
+        c = ib_ink(c, k2, step(0.996, sh) * smoothstep(0.19, 0.08, so) * G.snare * (wv + wb + wc));
     }
 
     // ---------- Build-up: ink fed in from the rim, sucked into the vortex ----------

@@ -34,7 +34,7 @@ fn bd_bars(p: vec2f, stage_y: f32, pulse: f32) -> vec3f {
     let pk = hist(sx, 0.12) * (1.25 - 0.35 * bc) + 0.03;
     c += pal(bc + 0.3) * 1.6 * colw * smoothstep(0.012, 0.0, abs(y - pk));
     // faint unlit LED grid
-    c += pal(bc) * 0.025 * colw * seg * step(0.0, y) * step(y, 1.25);
+    c += pal(bc) * 0.025 * colw * seg * step(0.0, y) * smoothstep(1.25, 0.9, y) * smoothstep(0.0, 0.04, bt);
     return c;
 }
 
@@ -195,7 +195,7 @@ fn look(fc: vec2f) -> vec4f {
     col += pal(0.5) * 0.08 * exp(-1.6 * length(p - vec2f(0.0, 0.15))) * (0.4 + en + 0.5 * pulse);
     // hats: glitter in the haze
     let gl = hash21(floor(p * 160.0) + floor(t * 30.0));
-    col += vec3f(0.9, 0.9, 1.0) * step(0.997, gl) * G.hat * 1.5 * haze;
+    col += vec3f(0.9, 0.9, 1.0) * step(0.997, gl) * smoothstep(0.5, 0.15, length(fract(p * 160.0) - 0.5)) * G.hat * 1.5 * haze;
 
     // ---------- moving heads from the truss ----------
     let truss_y = 0.87;
@@ -276,7 +276,7 @@ fn look(fc: vec2f) -> vec4f {
     }
     // blinders on the truss flash on hats
     let bl = vec2f(fract(p.x * 3.0) - 0.5, p.y - truss_y);
-    col += vec3f(1.0, 0.85, 0.6) * glow(length(bl / vec2f(3.0, 1.0)) - 0.006, 0.006) * (G.hat * 0.8 + drop) * 0.6;
+    col += vec3f(1.0, 0.85, 0.6) * glow(length(bl / vec2f(3.0, 1.0)) - 0.006, 0.006) * smoothstep(0.5, 0.15, abs(bl.x)) * smoothstep(0.6, 0.15, abs(bl.y)) * (G.hat * 0.8 + drop) * 0.6;
 
     // ---------- stage floor with reflection ----------
     if (p.y < stage_y) {
@@ -363,12 +363,12 @@ fn look(fc: vec2f) -> vec4f {
     if (back.x < px) {
         col = mix(col, vec3f(0.012, 0.008, 0.02) + rim_c * 0.3 * smoothstep(-0.01, 0.0, back.x) * smoothstep(-0.64, -0.5, p.y) * (0.4 + en), fill(back.x, px));
     }
-    col += vec3f(0.7, 0.85, 1.0) * (smoothstep(0.01, 0.0, back.y) * 1.5 + glow(back.y, 0.008) * 0.25) * (1.0 + 2.0 * wR);
+    col += vec3f(0.7, 0.85, 1.0) * (smoothstep(0.01, 0.0, back.y) * 1.5 + glow(back.y, 0.008) * 0.25 * smoothstep(0.12, 0.03, back.y)) * (1.0 + 2.0 * wR);
     let front = bd_crowd(p + vec2f(0.07, 0.0), 0.15, -0.78 - cdown, 1.15, 2.0, bounce * 1.1, raise);
     if (front.x < px) {
         col = mix(col, vec3f(0.003) + rim_c * 0.45 * smoothstep(-0.008, 0.0, front.x) * smoothstep(-0.84, -0.7, p.y) * (0.4 + en + G.snare), fill(front.x, px));
     }
-    col += vec3f(0.75, 0.9, 1.0) * (smoothstep(0.012, 0.0, front.y) * 1.8 + glow(front.y, 0.01) * 0.3) * (1.0 + 2.5 * wR);
+    col += vec3f(0.75, 0.9, 1.0) * (smoothstep(0.012, 0.0, front.y) * 1.8 + glow(front.y, 0.01) * 0.3 * smoothstep(0.12, 0.03, front.y)) * (1.0 + 2.5 * wR);
 
     // ---------- chorus confetti / breakdown fireflies (floating, melody-driven) ----------
     if (wC + wR > 0.01) {

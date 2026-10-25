@@ -306,7 +306,7 @@ fn look(fc0: vec2f) -> vec4f {
     col += vec3f(1.0, 0.1, 0.3) * smoothstep(0.08, 0.0, abs(tr)) * smoothstep(-0.1, -0.35, cq.y) * step(cq.y, -0.1) * 0.25 * tli * step(-0.42 - bounce, cq.y + 0.0) ;
     // waveform as the car's exhaust heat line
     let wx = cq.x * 1.2 + 0.5;
-    if (cq.y < -0.12 && cq.y > -0.28 && abs(cq.x) < 0.4) {
+    if (cq.y < -0.07 && cq.y > -0.33 && abs(cq.x) < 0.4) {
         let wv = wave(wx) * 0.05;
         col += cpink * nh_ln(abs(cq.y + 0.2 - wv), pxs * 1.2) * 0.6 * smoothstep(0.4, 0.1, abs(cq.x));
     }

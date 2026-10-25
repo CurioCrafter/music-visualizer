@@ -341,7 +341,7 @@ fn look(fc0: vec2f) -> vec4f {
         let ss = s / vc.z * AR_F;
         let dead = hash11(fi * 13.7 + G.beat_count * 0.731) < 0.45 && G.energy > 0.08;
         let ex = select(0.0, G.beat_phase, dead);
-        if (length(p - sc) > ss * (2.0 + 6.0 * ex) + 0.03) { continue; }
+        if (length(p - sc) > ss * (3.5 + 6.0 * ex) + 0.03) { continue; }
         let lq = (p - sc) / ss;
         let lpx = pxs / ss * 1.2;
         let sa = G.time * (0.6 + h1) + fi;

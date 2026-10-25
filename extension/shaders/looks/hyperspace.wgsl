@@ -19,13 +19,15 @@ fn hs_stars(p: vec2f, T: f32, na: f32, seed: f32, dens: f32, stretch: f32, px: f
     let h = hash21(vec2f(cu, cv) + vec2f(seed * 17.0, seed));
     if (h > dens) { return vec2f(0.0); }
     let h2 = hash21(vec2f(cv * 1.7, cu * 0.3) + seed);
-    let pd = (fu - 0.25 - 0.5 * h2) / na * TAU * r;
-    let L = 0.02 + stretch * 0.4;
+    let cu0 = fu - 0.25 - 0.5 * h2;
+    let pd = cu0 / na * TAU * r;
+    let L = 0.02 + stretch * 0.3;
     let ad = max(abs(fv) - L, 0.0) / 5.0 * r;
     let w = px * (0.6 + 1.1 * r) * (0.6 + h2);
     let d = length(vec2f(pd, ad));
     let head = mix(1.0, smoothstep(-L, L, fv) * 0.85 + 0.15, clamp(stretch * 2.0, 0.0, 1.0));
-    let b = (exp(-d * d / (w * w)) + 0.05 * exp(-d / (w * 2.5))) * head * smoothstep(0.03, 0.35, r) * (0.5 + h2);
+    let b = (exp(-d * d / (w * w)) + 0.05 * exp(-d / (w * 2.5))) * head * smoothstep(0.03, 0.35, r) * (0.5 + h2)
+        * smoothstep(0.25, 0.12, abs(cu0)) * smoothstep(0.5, 0.38, abs(fv));   // fade out before the cell border
     return vec2f(b, h2);
 }
 
@@ -274,7 +276,7 @@ fn look(fc: vec2f) -> vec4f {
             if (h > 0.3) { continue; }
             let o = hash22(cell + fi) * 0.36 - 0.18;
             let l = fract(q) - 0.5 - o;
-            let rad = 0.12 + 0.18 * hash11(h * 77.0);
+            let rad = 0.10 + 0.13 * hash11(h * 77.0);   // max radius*wobble stays inside the cell
             let ll = length(l);
             let dv = l / max(ll, 1e-4);
             let wob = 1.0 + 0.32 * (noise2(dv * 1.8 + vec2f(h * 50.0, fi)) - 0.5) + 0.1 * (noise2(dv * 5.0 + h * 20.0) - 0.5);

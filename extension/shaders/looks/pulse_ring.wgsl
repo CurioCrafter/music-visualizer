@@ -116,7 +116,7 @@ fn look(fc: vec2f) -> vec4f {
         let ring = pr_ring(r, rad, w) * segm;
         let br = 0.25 + 2.2 * s * (0.5 + lit);
         let rc = mix(pr_pc(fi * 0.23 + 0.1), vec3f(1.2), 0.25 * s);
-        col += (rc * ring * br + rc * glow(abs(r - rad) - w, 0.01) * 0.12 * br * segm) * ringK;
+        col += (rc * ring * br + rc * glow(abs(r - rad) - w, 0.01) * smoothstep(0.06, 0.0, abs(r - rad) - w) * 0.12 * br * segm) * ringK;
         // fine tick marks between rings
         col += vec3f(0.4) * pr_ring(r, rad + 0.03, 0.0015) * step(0.8, fract(ang / TAU * 120.0)) * 0.3 * ringK;
     }

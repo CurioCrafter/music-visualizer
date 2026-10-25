@@ -51,6 +51,25 @@ fn nc_layer(p: vec2f, li: f32, scale: f32, base: f32, hr: f32, rows: f32) -> NcH
     let dxs = min(fx - gap, 1.0 - gap - fx) / scale;
     let cov = clamp(min(dxs, top - p.y) / ncpx + 0.5, 0.0, 1.0);
     o.cov = max(o.cov, cov);
+    // sign state + its glow are computed before the early-out so the glow spills past the building edges
+    let has_sign = li > 1.5 && h2 < 0.55;
+    var sg_c = vec2f(0.0);
+    var sg_hs = vec2f(0.1);
+    var sg_sd = 1e3;
+    var sg_on = 0.0;
+    var sg_col = vec3f(0.0);
+    if (has_sign) {
+        let sx = gap + 0.12;
+        sg_c = vec2f((fx - sx) / scale, p.y - (top - 0.1 - 0.08 * h1));
+        sg_hs = vec2f(0.024, 0.1 + 0.04 * h1);
+        sg_sd = sd_box(sg_c, sg_hs);
+        let rate = 1.0 + 28.0 * nctens;
+        let fl = smoothstep(0.25, 0.35, noise2(vec2f(G.time * rate, bi * 3.7)));
+        sg_on = clamp(fl * (0.3 + 0.7 * (1.0 - ncq)) + 1.5 * G.snare * ncb + ncd * (1.0 - G.beat_phase), 0.0, 2.0);
+        sg_col = palc(h1 * 3.0 + floor(G.beat_count / 8.0) * 0.33 * ncd);
+        // zero well before the cell border (>= 0.1 away from the sign)
+        o.glow += sg_col * exp(-max(sg_sd, 0.0) * 35.0) * 0.3 * sg_on * smoothstep(0.1, 0.05, sg_sd);
+    }
     if (cov <= 0.0) { return o; }
 
     // facade
@@ -92,21 +111,17 @@ fn nc_layer(p: vec2f, li: f32, scale: f32, base: f32, hr: f32, rows: f32) -> NcH
         o.glow += rc * exp(-abs(p.y - top) * 60.0) * 0.08 * step(top, p.y) * step(gap, fx) * step(fx, 1.0 - gap);
     }
     // vertical signs on the near row: abstract glyph blocks (no text), flicker faster in the build-up
-    if (li > 1.5 && h2 < 0.55) {
-        let sx = gap + 0.12;
-        let sc = vec2f((fx - sx) / scale, p.y - (top - 0.1 - 0.08 * h1));
-        let hs = vec2f(0.024, 0.1 + 0.04 * h1);
-        let sd = sd_box(sc, hs);
-        let rate = 1.0 + 28.0 * nctens;
-        let fl = smoothstep(0.25, 0.35, noise2(vec2f(G.time * rate, bi * 3.7)));
-        let on = clamp(fl * (0.3 + 0.7 * (1.0 - ncq)) + 1.5 * G.snare * ncb + ncd * (1.0 - G.beat_phase), 0.0, 2.0);
+    if (has_sign) {
+        let sc = sg_c;
+        let hs = sg_hs;
+        let sd = sg_sd;
+        let on = sg_on;
+        let scol = sg_col;
         let gq = (sc + hs) / (hs * 2.0) * vec2f(2.0, 7.0);
         let glyph = step(0.45, hash21(floor(gq) + bi)) * step(0.15, fract(gq.x)) * step(0.2, fract(gq.y));
-        let scol = palc(h1 * 3.0 + floor(G.beat_count / 8.0) * 0.33 * ncd);
         o.col = mix(o.col, vec3f(0.01), fill(sd, ncpx));
         o.col += scol * fill(sd + 0.003, ncpx) * glyph * on * 1.6;
         o.col += scol * nc_ln(abs(sd), ncpx * 1.5) * on;
-        o.glow += scol * exp(-max(sd, 0.0) * 35.0) * 0.3 * on;
     }
     return o;
 }
@@ -115,7 +130,8 @@ fn nc_layer(p: vec2f, li: f32, scale: f32, base: f32, hr: f32, rows: f32) -> NcH
 fn nc_burst(p: vec2f, c: vec2f, ph: f32, seed: f32, size: f32) -> vec3f {
     let q = p - c + vec2f(0.0, ph * ph * 0.12);
     let r = length(q);
-    if (r > size * 0.5) { return vec3f(0.0); }
+    let M = size * 0.5;
+    if (r > M) { return vec3f(0.0); }
     let a = atan2(q.y, q.x);
     let n = 34.0;
     let u = (a / TAU + 0.5) * n;
@@ -129,7 +145,7 @@ fn nc_burst(p: vec2f, c: vec2f, ph: f32, seed: f32, size: f32) -> vec3f {
     let tw = mix(1.0, step(0.5, hash11(cell + floor(G.time * 20.0))), smoothstep(0.5, 0.8, ph));
     let fade = pow(1.0 - ph, 1.5);
     let c1 = palc(seed * 0.37 + hh * 0.2);
-    return (c1 * (exp(-d / 0.003) * head * 2.0 + exp(-d / 0.015) * 0.2) * tw + vec3f(1.0, 0.9, 0.7) * exp(-r * 25.0) * pow(1.0 - ph, 6.0) * 3.0) * fade;
+    return (c1 * (exp(-d / 0.003) * head * 2.0 + exp(-d / 0.015) * 0.2) * tw + vec3f(1.0, 0.9, 0.7) * exp(-r * 25.0) * pow(1.0 - ph, 6.0) * 3.0) * fade * smoothstep(M, M * 0.55, r);   // soft edge instead of a hard circle
 }
 
 // everything above the street (also used for the reflection)
@@ -220,7 +236,7 @@ fn nc_scene(p: vec2f) -> vec3f {
                 let hh = hash11(cell * 1.7 + lane);
                 if (hh > tw * 0.7) { continue; }
                 let lx = (fract(xs) - 0.5) * dir;   // + = ahead
-                let trail = smoothstep(-0.35 - 0.4 * ncd, 0.0, lx) * step(lx, 0.0);
+                let trail = smoothstep(-0.35 - 0.4 * ncd, 0.0, lx) * step(lx, 0.0) * smoothstep(-0.5, -0.36, lx);
                 let core = exp(-(lx * lx) / 0.0006);
                 let tc = select(vec3f(1.0, 0.15, 0.2), vec3f(1.0, 0.92, 0.75), dir > 0.0);
                 let v = exp(-(dy * dy) / (0.000012 * (2.0 - f32(li))));
@@ -243,7 +259,7 @@ fn nc_scene(p: vec2f) -> vec3f {
                 let bd = length(vec2f((fract(bx) - 0.5) / 22.0 * (0.9 + 0.3 * fg), dy));
                 let bc = palc(floor(bx) * 0.21 + fg * 0.5 + G.time * 0.05);
                 let tw = 0.6 + 0.4 * sin(floor(bx) * 1.7 + G.time * 3.0) + G.hat;
-                col += bc * (smoothstep(0.006, 0.002, bd) * 1.6 + exp(-bd * 120.0) * 0.4) * tw * ncc;
+                col += bc * (smoothstep(0.006, 0.002, bd) * 1.6 + exp(-bd * 120.0) * 0.4 * smoothstep(0.022, 0.008, bd)) * tw * ncc;
             }
         }
     }
@@ -302,7 +318,7 @@ fn look(fc: vec2f) -> vec4f {
         let rh = hash21(rcell);
         let rph = fract(lt * 1.1 + rh * 5.0);
         let rl = (fract(rq) - 0.5 - (hash22(rcell) - 0.5) * 0.4);
-        let ring = exp(-abs(length(rl) - rph * 0.45) / 0.025) * (1.0 - rph) * puddle;
+        let ring = exp(-abs(length(rl) - rph * 0.3) / 0.025) * (1.0 - rph) * smoothstep(0.29, 0.2, length(rl)) * puddle;
         col += (luma(rc) * 0.8 + 0.04) * ring * (1.0 + 2.0 * G.kick) * vec3f(0.8, 0.9, 1.0) * (1.0 - ncd * 0.8);
         // ground traffic: headlights and tail lights, smeared down the wet road
         for (var k = 0; k < 2; k++) {
@@ -369,7 +385,7 @@ fn look(fc: vec2f) -> vec4f {
             let refr = nc_scene(vec2f(p.x - dl.x * 0.8, ncys + 0.4 - dl.y * 1.5));
             col = mix(col, refr * 0.7, inside * nck);
             col += vec3f(0.9, 0.95, 1.0) * smoothstep(0.03, 0.0, length(dl - vec2f(-0.3, 0.35) * dr)) * inside * nck;
-            col += vec3f(0.4, 0.5, 0.7) * nc_ln(abs(dd - dr), 0.012) * 0.25 * nck;
+            col += vec3f(0.4, 0.5, 0.7) * nc_ln(abs(dd - dr), 0.012) * 0.25 * nck * smoothstep(dr + 0.045, dr + 0.012, dd);
         }
     }
 

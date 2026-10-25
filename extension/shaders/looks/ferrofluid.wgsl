@@ -78,7 +78,7 @@ fn ff_blob(p: vec2f, M: vec2f, R: f32, amp: f32, mdir: vec2f, mpull: f32, px: f3
     let sp = pow(max(dot(reflect(-L, n), vec3f(0.0, 0.0, 1.0)), 0.0), 70.0);
     c += vec3f(1.5, 1.45, 1.4) * sp * (0.5 + 0.8 * G.energy);
     // hats: sparkle on spike tips
-    c += vec3f(1.2, 1.2, 1.4) * G.hat * step(0.985, hash21(floor(p * 220.0))) * (1.0 - hz);
+    c += vec3f(1.2, 1.2, 1.4) * G.hat * step(0.985, hash21(floor(p * 220.0))) * smoothstep(0.5, 0.15, length(fract(p * 220.0) - 0.5)) * (1.0 - hz);
     return vec4f(c, fill(d, px));
 }
 
@@ -185,8 +185,9 @@ fn look(fc: vec2f) -> vec4f {
         col += vec3f(0.5, 0.15, 0.05) * smoothstep(0.004, 0.0, rd2) * wB;
     }
     // dust motes in the light
-    let dm = hash21(floor((p + vec2f(0.0, t * 0.02)) * 90.0));
-    col += vec3f(0.6) * step(0.996 - 0.004 * wR, dm) * (0.3 + G.high + 0.8 * wR * G.mid) * smoothstep(-0.3, 0.6, p.y);
+    let dmp = (p + vec2f(0.0, t * 0.02)) * 90.0;
+    let dm = hash21(floor(dmp));
+    col += vec3f(0.6) * step(0.996 - 0.004 * wR, dm) * smoothstep(0.5, 0.15, length(fract(dmp) - 0.5)) * (0.3 + G.high + 0.8 * wR * G.mid) * smoothstep(-0.3, 0.6, p.y);
 
     // ---------- floor: mirror + iron filings ----------
     if (p.y < H) {
@@ -215,19 +216,24 @@ fn look(fc: vec2f) -> vec4f {
         fl += pcol * 0.12 * exp(-abs(abs(p.x) - asp * 0.9) * 20.0) * exp(-dy * 3.0);
         // iron filings line up with the field
         let cs = 0.05;
-        let cid = floor(fp / cs);
-        let jit = hash22(cid);
-        let cc = (cid + 0.25 + 0.5 * jit) * cs;
-        let rel = cc - fm;
-        let dist = length(rel);
-        let ang = atan2(rel.y, rel.x) + 0.6 * G.mid * sin(t * 0.7) / (1.0 + dist) + (jit.x - 0.5) * (0.25 + 2.5 * G.kick * drums / (1.0 + dist * 2.0)) * (1.0 - 0.6 * tens);
-        let lq = rot(-ang) * (fp - cc);
-        let len = cs * (0.25 + 0.35 / (1.0 + dist * 1.5)) * (1.0 + 0.6 * G.kick + 0.6 * tens + 0.3 * wC);
-        let fd = sd_box(lq, vec2f(len, cs * 0.05));
-        let fpx = px * 0.6 / (dy * dy);
-        let fcov = fill(fd, fpx) * smoothstep(9.0, 3.0, Z) * step(0.25, jit.y);
-        let glint = pow(abs(sin(ang * 2.0 + p.x * 3.0 + t * 0.3)), 8.0);
-        fl = mix(fl, vec3f(0.05, 0.05, 0.06) + mix(pal(0.0), pal(1.0), step(0.0, rel.x)) * glint * 0.7 * (0.4 + en), fcov * 0.85);
+        for (var oy = -1; oy <= 1; oy++) {
+        for (var ox = -1; ox <= 1; ox++) {   // 3x3 cells: a filing longer than its cell is not cut at the cell border
+            let cid = floor(fp / cs) + vec2f(f32(ox), f32(oy));
+            let jit = hash22(cid);
+            if (jit.y < 0.25) { continue; }
+            let cc = (cid + 0.25 + 0.5 * jit) * cs;
+            let rel = cc - fm;
+            let dist = length(rel);
+            let ang = atan2(rel.y, rel.x) + 0.6 * G.mid * sin(t * 0.7) / (1.0 + dist) + (jit.x - 0.5) * (0.25 + 2.5 * G.kick * drums / (1.0 + dist * 2.0)) * (1.0 - 0.6 * tens);
+            let lq = rot(-ang) * (fp - cc);
+            let len = min(cs * (0.25 + 0.35 / (1.0 + dist * 1.5)) * (1.0 + 0.6 * G.kick + 0.6 * tens + 0.3 * wC), cs * 1.2);
+            let fd = sd_box(lq, vec2f(len, cs * 0.05));
+            let fpx = px * 0.6 / (dy * dy);
+            let fcov = fill(fd, fpx) * smoothstep(9.0, 3.0, Z);
+            let glint = pow(abs(sin(ang * 2.0 + p.x * 3.0 + t * 0.3)), 8.0);
+            fl = mix(fl, vec3f(0.05, 0.05, 0.06) + mix(pal(0.0), pal(1.0), step(0.0, rel.x)) * glint * 0.7 * (0.4 + en), fcov * 0.85);
+        }
+        }
         // horizon sheen
         fl += vec3f(0.12, 0.12, 0.15) * exp(-dy * 25.0);
         col = fl;

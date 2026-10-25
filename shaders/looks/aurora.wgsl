@@ -33,6 +33,24 @@ fn au_ridge(x: f32, seed: f32) -> f32 {
     return s;
 }
 
+// sin-free value noise: common noise2()'s sin(dot*43758) hash loses precision for big arguments (late in the song),
+// so the same lattice point can hash differently on the two sides of a cell border -> a hard vertical step.
+fn au_h(p: vec2f) -> f32 {
+    var p3 = fract(vec3f(p.x, p.y, p.x) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+fn au_n(p: vec2f) -> f32 {
+    let i = floor(p); let f = fract(p);
+    let u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(au_h(i), au_h(i + vec2f(1.0, 0.0)), u.x), mix(au_h(i + vec2f(0.0, 1.0)), au_h(i + vec2f(1.0, 1.0)), u.x), u.y);
+}
+fn au_fbm(p0: vec2f) -> f32 {
+    var p = p0; var a = 0.5; var s = 0.0;
+    for (var i = 0; i < 3; i++) { s += a * au_n(p); p = p * 2.03 + vec2f(1.7, 9.2); a *= 0.5; }
+    return s;
+}
+
 // one aurora curtain; drive = the band that feeds it, lo/hi = spectrum range that lights it along x
 fn au_curtain(q: vec2f, i: f32, drive0: f32, lo: f32, hi: f32) -> vec3f {
     let t = G.time;
@@ -46,11 +64,11 @@ fn au_curtain(q: vec2f, i: f32, drive0: f32, lo: f32, hi: f32) -> vec3f {
     let near = exp(-au_sq((q.x - m.x) * 1.3)) * G.mouse_on;
     x += (m.x - q.x) * 0.25 * G.mouse_on * exp(-abs(q.x - m.x) * 0.8);
     let speed = 0.035 + 0.10 * G.flux;
-    let fold = fbm2(vec2f(x * 0.55 + i * 7.3, t * speed + i * 3.0), 3);
+    let fold = au_fbm(vec2f(x * 0.55 + i * 7.3, t * speed + i * 3.0));
     let s = clamp(q.x / A * 0.5 + 0.5, 0.0, 1.0);
     var yb = AU_H + 0.42 + 0.17 * i + (fold - 0.5) * 0.55
         + hist(mix(lo, hi, s) / 95.0, 0.15 + 0.2 * i) * 0.07
-        + wave(fract(s + i * 0.31)) * 0.012 * (1.0 + G.flux * 2.0);
+        + wave(1.0 - abs(1.0 - 2.0 * fract(s + i * 0.31))) * 0.012 * (1.0 + G.flux * 2.0);
     yb += (fold - 0.5) * 0.25 * S.d;                                   // drop: curtains whip harder
     yb = mix(yb, AU_H + 0.58 + 0.05 * i, 0.6 * S.bp);                  // build-up: all curtains converge into one band
     yb -= 0.16 * near * (0.5 + 0.5 * clamp(m.y - AU_H, 0.0, 1.0));
@@ -78,7 +96,8 @@ fn au_curtain(q: vec2f, i: f32, drive0: f32, lo: f32, hi: f32) -> vec3f {
     var cc = mix(pal(ct), mix(pal(1.0 - ct), vec3f(1.0, 0.9, 0.95), 0.2), S.d);
     cc = mix(cc, pal(1.0) * 1.2 + 0.1, 0.5 * S.bp);
     cc = mix(cc, pal(0.15 + 0.7 * ct) * 0.7 + vec3f(0.12, 0.1, 0.06), 0.35 * S.c);       // chorus: warmer, pastel
-    return cc * (prof * (1.0 + pulse) + fringe) * rays * local * level * 0.55;
+    let topfade = smoothstep(hgt * 4.0, hgt * 2.2, dy);   // light ends before the early-out line
+    return cc * (prof * (1.0 + pulse) * topfade + fringe) * rays * local * level * 0.55;
 }
 
 fn au_wolf(l: vec2f, howl: f32) -> f32 {
@@ -129,7 +148,7 @@ fn au_scene(q: vec2f) -> vec3f {
     let sg = q * 40.0;
     let sc = floor(sg);
     let sh = hash21(sc);
-    let sd = length(fract(sg) - (hash22(sc) * 0.7 + 0.15));
+    let sd = length(fract(sg) - (hash22(sc) * 0.4 + 0.3));
     let tw = 0.6 + 0.4 * sin(t * (1.0 + 4.0 * hash21(sc + 7.0)) + sh * 60.0) + G.hat * 0.8 * step(0.6, hash21(sc + 3.0));
     var stars = smoothstep(0.8 - 0.35 * mw, 1.0, sh) * tw * exp(-sd * sd * 170.0) * 1.3;
     let bg = q * 8.0;
@@ -137,7 +156,7 @@ fn au_scene(q: vec2f) -> vec3f {
     let bo = fract(bg) - (hash22(bc + 5.0) * 0.6 + 0.2);
     let bh = hash21(bc + 31.0);
     stars += step(0.85, bh) * (0.7 + 0.3 * sin(t * 1.3 + bh * 40.0) + 0.5 * G.snare) * (exp(-dot(bo, bo) * 1500.0) * 2.0
-        + (exp(-abs(bo.x) * 120.0) * exp(-abs(bo.y) * 12.0) + exp(-abs(bo.y) * 120.0) * exp(-abs(bo.x) * 12.0)) * 0.3);
+        + (exp(-abs(bo.x) * 120.0) * exp(-abs(bo.y) * 12.0) * smoothstep(0.2, 0.08, abs(bo.y)) + exp(-abs(bo.y) * 120.0) * exp(-abs(bo.x) * 12.0) * smoothstep(0.2, 0.08, abs(bo.x))) * 0.3);
     col += vec3f(0.85, 0.92, 1.0) * stars * smoothstep(0.05, 0.3, hh) * (1.0 + 0.8 * S.q + 0.4 * S.k - 0.4 * S.d);
 
     // aurora curtains: back (treble) -> mid -> front (bass)
@@ -317,7 +336,7 @@ fn au_scene(q: vec2f) -> vec3f {
         let mr = length(q - mouth);
         for (var j = 0; j < 3; j++) {
             let rr = fract(t * 0.7 + f32(j) / 3.0) * 0.35;
-            col += G.pal2.rgb * exp(-au_sq((mr - rr) * 120.0)) * (1.0 - rr / 0.35) * howl * 0.5 * step(-0.2, q.y - mouth.y);
+            col += G.pal2.rgb * exp(-au_sq((mr - rr) * 120.0)) * (1.0 - rr / 0.35) * howl * 0.5 * smoothstep(-0.25, -0.05, q.y - mouth.y);
         }
     }
     return col;
